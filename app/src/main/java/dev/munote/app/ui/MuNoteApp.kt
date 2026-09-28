@@ -1153,13 +1153,23 @@ private fun PdfInkPage(
 
                 val rect = highlight?.rect
                 if (rect != null) {
+                    val highlightFill = if (highlight.source == SearchSource.HANDWRITING) {
+                        Color(0x5538BDF8)
+                    } else {
+                        Color(0x66FFD54F)
+                    }
+                    val highlightStroke = if (highlight.source == SearchSource.HANDWRITING) {
+                        Color(0xCC0284C7)
+                    } else {
+                        Color(0xCCF59E0B)
+                    }
                     Canvas(Modifier.fillMaxSize()) {
                         val left = rect.left * size.width
                         val top = rect.top * size.height
                         val right = rect.right * size.width
                         val bottom = rect.bottom * size.height
                         drawRect(
-                            color = Color(0x66FFD54F),
+                            color = highlightFill,
                             topLeft = Offset(left, top),
                             size = Size(
                                 (right - left).coerceAtLeast(2f),
@@ -1167,7 +1177,7 @@ private fun PdfInkPage(
                             )
                         )
                         drawRect(
-                            color = Color(0xCCF59E0B),
+                            color = highlightStroke,
                             topLeft = Offset(left, top),
                             size = Size(
                                 (right - left).coerceAtLeast(2f),
