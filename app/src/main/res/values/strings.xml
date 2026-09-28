@@ -1,6 +1,7 @@
 <resources>
     <string name="app_name">MuNote</string>
     <string name="default_pdf_note">PDF 笔记</string>
+    <string name="default_notebook_title">未命名笔记</string>
 
     <string name="error_pdf_open">PDF 打开失败</string>
     <string name="error_local_pdf_open">本地 PDF 打开失败</string>
@@ -14,6 +15,8 @@
     <string name="error_handwriting_model_missing">没有找到简体中文数字墨水模型</string>
     <string name="error_cover_open">无法读取封面图片</string>
     <string name="error_cover_save">封面保存失败</string>
+    <string name="error_notebook_save">笔记页面保存失败</string>
+    <string name="error_not_notebook">这个文档不是原生笔记</string>
 
     <string name="dialog_rename_title">重命名</string>
     <string name="label_document_name">文档名称</string>
@@ -22,10 +25,20 @@
     <string name="action_delete">删除</string>
     <string name="action_rename">重命名</string>
     <string name="action_import_pdf">导入 PDF</string>
+    <string name="action_new_notebook">新建笔记</string>
+    <string name="action_create">创建</string>
+    <string name="action_add_page">添加页面</string>
     <string name="action_set_cover">自定义封面</string>
     <string name="action_reset_cover">恢复第一页封面</string>
     <string name="dialog_delete_title">删除这个文档？</string>
-    <string name="dialog_delete_message">会删除 MuNote 本地保存的 PDF、手写笔迹和识别索引。原来文件管理器里的源 PDF 不受影响。</string>
+    <string name="dialog_delete_message">会删除 MuNote 本地保存的文档、手写笔迹、文本框和识别索引。导入 PDF 的原始源文件不受影响。</string>
+    <string name="dialog_new_notebook_title">新建笔记</string>
+    <string name="label_notebook_name">笔记名称</string>
+    <string name="label_page_template">纸张模板</string>
+    <string name="template_blank">空白</string>
+    <string name="template_ruled">横线</string>
+    <string name="template_grid">方格</string>
+    <string name="template_dot">点阵</string>
 
     <string name="home_tagline">手写优先 · PDF OCR · 手写可搜索</string>
     <string name="home_empty_title">把教材或扫描 PDF 放进来</string>
@@ -33,6 +46,7 @@
     <string name="recent_documents">最近文档</string>
     <string name="last_viewed_page">上次看到第 %1$d 页 · 本地保存</string>
     <string name="local_saved_auto_ocr">本地保存 · 打开后自动继续 OCR</string>
+    <string name="native_notebook_pages">原生笔记 · %1$d 页</string>
 
     <string name="toast_export_success">已导出带批注 PDF</string>
     <string name="toast_export_cancelled">已取消导出</string>
@@ -62,6 +76,7 @@
     <string name="cd_redo">重做</string>
     <string name="cd_previous_page">上一页</string>
     <string name="cd_next_page">下一页</string>
+    <string name="cd_add_page">添加笔记页面</string>
     <string name="cd_document_menu">文档菜单</string>
     <string name="cd_page_thumbnail">第 %1$d 页缩略图</string>
     <string name="cd_pdf_page">PDF 第 %1$d 页</string>
