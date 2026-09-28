@@ -211,4 +211,15 @@
     <string name="split_pdf_document">PDF 文档</string>
 
     <string name="action_open">打开</string>
+
+    <string name="action_stickers">贴纸</string>
+    <string name="image_save_as_sticker">保存为贴纸</string>
+    <string name="sticker_library_title">贴纸库</string>
+    <string name="sticker_library_hint">选中图片后可以保存成贴纸；之后在任何文档里都能重复插入。</string>
+    <string name="sticker_library_empty">还没有贴纸。先选中一张图片，再点星标把它保存到贴纸库。</string>
+    <string name="sticker_item_description">贴纸</string>
+    <string name="sticker_delete">删除贴纸</string>
+    <string name="toast_sticker_saved">已保存到贴纸库</string>
+    <string name="error_sticker_save">保存贴纸失败</string>
+
 </resources>
