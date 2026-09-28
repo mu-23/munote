@@ -2,14 +2,34 @@
 
 Android tablet handwriting + searchable scanned-PDF notebook.
 
-This repository is being built as a clean-room implementation inspired by the interaction quality of modern handwriting apps and the OCR/search workflow of PDF-first note apps.
+MuNote is a clean-room, local-first Android project aimed at combining a Notein-like handwriting experience with the search/OCR workflow that makes scanned textbooks practical to study.
 
-## MVP goals
-- Low-latency stylus handwriting with pressure + velocity response and palm rejection
-- Import image-only/scanned PDFs
-- On-device Simplified Chinese + Latin OCR
-- Search OCR text and jump directly to matching pages
-- Minimal tablet-first UI
-- Local-first storage; no account required
+## Current features
 
-See `docs/RESEARCH.md` and `docs/ARCHITECTURE.md`.
+- Native Android stylus ink with historical digitizer samples
+- Pressure + velocity-aware variable-width pen
+- Highlighter, stroke eraser, undo/redo
+- Stylus lasso selection and drag-to-move
+- Finger-only pinch zoom, pan, and page swipe
+- PDF import with a persistent local document library
+- Resume at the last viewed page
+- Page thumbnail rail and persistent bookmarks
+- On-device Simplified Chinese scanned-PDF OCR
+- Search scanned/image-only PDF text, jump to matches, and highlight the OCR region
+- On-device Chinese digital-ink recognition for the user's own handwriting
+- Unified search across PDF OCR and handwritten ink
+- Flattened PDF export with handwritten annotations
+- Rename/delete local library documents
+- No account required and no paid OCR API
+
+The original imported PDF is kept separate from editable MuNote ink. Editing does not destructively rewrite the source PDF.
+
+## Status
+
+The core workflow now builds successfully in GitHub Actions and is ready for repeated real-device testing.
+
+The biggest remaining quality gate is handwriting feel on the target tablet: smoothing, pressure curve, velocity thinning, pen-down/pen-up behavior, palm rejection, and model-specific stylus button handling all need real hardware feedback before they should be considered final.
+
+See:
+- `docs/RESEARCH.md`
+- `docs/ARCHITECTURE.md`
