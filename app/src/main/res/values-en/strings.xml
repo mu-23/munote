@@ -140,4 +140,11 @@
     <string name="toast_backup_created">Local backup created</string>
     <string name="toast_backup_restored">Local backup restored</string>
 
+
+    <string name="page_overview_manage_hint">Long-press and drag pages to reorder. Use each page menu to duplicate, change its template, or delete it.</string>
+    <string name="cd_page_actions">Page %1$d actions</string>
+    <string name="action_duplicate_page">Duplicate page</string>
+    <string name="action_delete_page">Delete page</string>
+    <string name="action_set_page_template">Use %1$s template</string>
+
 </resources>

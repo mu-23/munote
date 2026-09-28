@@ -76,6 +76,48 @@ class TextStore(
         persist()
     }
 
+    suspend fun deletePage(index: Int) = withContext(Dispatchers.IO) {
+        val remapped = linkedMapOf<Int, MutableList<TextBoxNote>>()
+        pages.entries.sortedBy { it.key }.forEach { (page, boxes) ->
+            when {
+                page < index -> remapped[page] = boxes.toMutableList()
+                page > index -> remapped[page - 1] = boxes.toMutableList()
+            }
+        }
+        pages.clear()
+        pages.putAll(remapped)
+        persist()
+    }
+
+    suspend fun duplicatePage(index: Int) = withContext(Dispatchers.IO) {
+        val source = page(index).map { it.copy(id = UUID.randomUUID().toString()) }
+        val remapped = linkedMapOf<Int, MutableList<TextBoxNote>>()
+        pages.entries.sortedBy { it.key }.forEach { (page, boxes) ->
+            remapped[if (page > index) page + 1 else page] = boxes.toMutableList()
+        }
+        if (source.isNotEmpty()) remapped[index + 1] = source.toMutableList()
+        pages.clear()
+        pages.putAll(remapped.toSortedMap())
+        persist()
+    }
+
+    suspend fun movePage(fromIndex: Int, toIndex: Int) = withContext(Dispatchers.IO) {
+        if (fromIndex == toIndex) return@withContext
+        fun remap(page: Int): Int = when {
+            page == fromIndex -> toIndex
+            fromIndex < toIndex && page in (fromIndex + 1)..toIndex -> page - 1
+            fromIndex > toIndex && page in toIndex until fromIndex -> page + 1
+            else -> page
+        }
+        val moved = linkedMapOf<Int, MutableList<TextBoxNote>>()
+        pages.forEach { (page, boxes) ->
+            moved[remap(page)] = boxes.toMutableList()
+        }
+        pages.clear()
+        pages.putAll(moved.toSortedMap())
+        persist()
+    }
+
     fun search(query: String): List<SearchHit> {
         val q = query.trim()
         if (q.isEmpty()) return emptyList()

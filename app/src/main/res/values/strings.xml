@@ -140,4 +140,11 @@
     <string name="toast_backup_created">本地备份已创建</string>
     <string name="toast_backup_restored">本地备份已恢复</string>
 
+
+    <string name="page_overview_manage_hint">长按并拖动页面即可排序；右上角菜单可以复制、换模板或删除页面</string>
+    <string name="cd_page_actions">第 %1$d 页操作</string>
+    <string name="action_duplicate_page">复制页面</string>
+    <string name="action_delete_page">删除页面</string>
+    <string name="action_set_page_template">换成%1$s</string>
+
 </resources>
