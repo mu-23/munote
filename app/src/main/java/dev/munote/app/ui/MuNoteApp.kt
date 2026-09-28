@@ -7,11 +7,13 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.background
+import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
@@ -163,6 +165,7 @@ fun MuNoteApp(initialPdf: Uri?) {
     var ocrRevision by remember { mutableIntStateOf(0) }
     var handwritingModelState by remember { mutableStateOf(HandwritingModelState.NOT_READY) }
     var libraryRevision by remember { mutableIntStateOf(0) }
+    var coverTarget by remember { mutableStateOf<LibraryEntry?>(null) }
 
     fun attachSession(next: PdfSession, entry: LibraryEntry) {
         session?.close()
@@ -223,6 +226,20 @@ fun MuNoteApp(initialPdf: Uri?) {
         ActivityResultContracts.OpenDocument()
     ) { uri ->
         if (uri != null) openPdf(uri)
+    }
+
+    val coverPicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        val target = coverTarget
+        coverTarget = null
+        if (uri != null && target != null) {
+            scope.launch {
+                runCatching { library.setCustomCover(target, uri) }
+                    .onSuccess { libraryRevision++ }
+                    .onFailure { loadError = it.message }
+            }
+        }
     }
 
     LaunchedEffect(initialPdf) {
@@ -294,6 +311,7 @@ fun MuNoteApp(initialPdf: Uri?) {
 
     if (session == null) {
         LibraryHome(
+            library = library,
             entries = remember(libraryRevision) { library.entries() },
             error = loadError,
             onImport = { picker.launch(arrayOf("application/pdf")) },
@@ -310,6 +328,17 @@ fun MuNoteApp(initialPdf: Uri?) {
                     runCatching { library.delete(entry) }
                         .onSuccess { libraryRevision++ }
                         .onFailure { loadError = it.message ?: context.getString(R.string.error_delete) }
+                }
+            },
+            onSetCover = { entry ->
+                coverTarget = entry
+                coverPicker.launch(arrayOf("image/*"))
+            },
+            onResetCover = { entry ->
+                scope.launch {
+                    runCatching { library.clearCustomCover(entry) }
+                        .onSuccess { libraryRevision++ }
+                        .onFailure { loadError = it.message }
                 }
             },
         )
@@ -393,14 +422,18 @@ private fun LanguageMenu() {
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun LibraryHome(
+    library: PdfLibrary,
     entries: List<LibraryEntry>,
     error: String?,
     onImport: () -> Unit,
     onOpen: (LibraryEntry) -> Unit,
     onRename: (LibraryEntry, String) -> Unit,
     onDelete: (LibraryEntry) -> Unit,
+    onSetCover: (LibraryEntry) -> Unit,
+    onResetCover: (LibraryEntry) -> Unit,
 ) {
     var renameTarget by remember { mutableStateOf<LibraryEntry?>(null) }
     var renameText by remember { mutableStateOf("") }
@@ -430,7 +463,9 @@ private fun LibraryHome(
                 }
             },
             dismissButton = {
-                TextButton(onClick = { renameTarget = null }) { Text(stringResource(R.string.action_cancel)) }
+                TextButton(onClick = { renameTarget = null }) {
+                    Text(stringResource(R.string.action_cancel))
+                }
             }
         )
     }
@@ -439,9 +474,7 @@ private fun LibraryHome(
         AlertDialog(
             onDismissRequest = { deleteTarget = null },
             title = { Text(stringResource(R.string.dialog_delete_title)) },
-            text = {
-                Text(stringResource(R.string.dialog_delete_message))
-            },
+            text = { Text(stringResource(R.string.dialog_delete_message)) },
             confirmButton = {
                 TextButton(
                     onClick = {
@@ -449,11 +482,16 @@ private fun LibraryHome(
                         deleteTarget = null
                     }
                 ) {
-                    Text(stringResource(R.string.action_delete), color = MaterialTheme.colorScheme.error)
+                    Text(
+                        stringResource(R.string.action_delete),
+                        color = MaterialTheme.colorScheme.error
+                    )
                 }
             },
             dismissButton = {
-                TextButton(onClick = { deleteTarget = null }) { Text(stringResource(R.string.action_cancel)) }
+                TextButton(onClick = { deleteTarget = null }) {
+                    Text(stringResource(R.string.action_cancel))
+                }
             }
         )
     }
@@ -491,7 +529,10 @@ private fun LibraryHome(
                         horizontalArrangement = Arrangement.spacedBy(7.dp)
                     ) {
                         Icon(Icons.Default.FolderOpen, contentDescription = null)
-                        Text(stringResource(R.string.action_import_pdf), style = MaterialTheme.typography.labelLarge)
+                        Text(
+                            stringResource(R.string.action_import_pdf),
+                            style = MaterialTheme.typography.labelLarge
+                        )
                     }
                 }
             }
@@ -523,7 +564,10 @@ private fun LibraryHome(
                         verticalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
                         FilledTonalIconButton(onClick = onImport, modifier = Modifier.size(58.dp)) {
-                            Icon(Icons.Default.FolderOpen, contentDescription = stringResource(R.string.action_import_pdf))
+                            Icon(
+                                Icons.Default.FolderOpen,
+                                contentDescription = stringResource(R.string.action_import_pdf)
+                            )
                         }
                         Text(stringResource(R.string.home_empty_title))
                         Text(
@@ -540,25 +584,30 @@ private fun LibraryHome(
                 modifier = Modifier.padding(start = 24.dp, top = 18.dp, bottom = 8.dp),
                 style = MaterialTheme.typography.titleMedium
             )
-            LazyColumn(
+            LazyVerticalGrid(
+                columns = GridCells.Adaptive(150.dp),
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxWidth(),
                 contentPadding = PaddingValues(horizontal = 20.dp, vertical = 8.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
+                horizontalArrangement = Arrangement.spacedBy(18.dp),
+                verticalArrangement = Arrangement.spacedBy(20.dp)
             ) {
                 items(
                     count = entries.size,
                     key = { entries[it].fingerprint }
                 ) { index ->
                     val entry = entries[index]
-                    LibraryDocumentRow(
+                    LibraryDocumentCard(
+                        library = library,
                         entry = entry,
                         onClick = { onOpen(entry) },
                         onRename = {
                             renameText = entry.title
                             renameTarget = entry
                         },
+                        onSetCover = { onSetCover(entry) },
+                        onResetCover = { onResetCover(entry) },
                         onDelete = { deleteTarget = entry },
                     )
                 }
@@ -567,79 +616,142 @@ private fun LibraryHome(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun LibraryDocumentRow(
+private fun LibraryDocumentCard(
+    library: PdfLibrary,
     entry: LibraryEntry,
     onClick: () -> Unit,
     onRename: () -> Unit,
+    onSetCover: () -> Unit,
+    onResetCover: () -> Unit,
     onDelete: () -> Unit,
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
-
-    Surface(
-        onClick = onClick,
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(18.dp),
-        tonalElevation = 1.dp
+    val cover by produceState<Bitmap?>(
+        initialValue = null,
+        entry.fingerprint,
+        entry.hasCustomCover
     ) {
-        Row(
-            Modifier.padding(horizontal = 18.dp, vertical = 14.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(14.dp)
+        value = library.renderCover(entry, 420)
+    }
+
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalAlignment = Alignment.Start
+    ) {
+        Surface(
+            onClick = onClick,
+            modifier = Modifier
+                .fillMaxWidth()
+                .aspectRatio(0.72f),
+            shape = RoundedCornerShape(16.dp),
+            tonalElevation = 2.dp,
+            color = Color.White
         ) {
-            Surface(
-                modifier = Modifier.size(48.dp),
-                shape = RoundedCornerShape(14.dp),
-                color = MaterialTheme.colorScheme.primaryContainer
-            ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Text("PDF", style = MaterialTheme.typography.labelLarge)
+            Box(Modifier.fillMaxSize()) {
+                val bitmap = cover
+                if (bitmap != null) {
+                    Image(
+                        bitmap = bitmap.asImageBitmap(),
+                        contentDescription = entry.title,
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Fit
+                    )
+                } else {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(MaterialTheme.colorScheme.surfaceVariant),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text("PDF", style = MaterialTheme.typography.titleLarge)
+                    }
                 }
-            }
-            Column(Modifier.weight(1f)) {
-                Text(
-                    entry.title,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    style = MaterialTheme.typography.titleSmall
-                )
-                Text(
-                    if (entry.lastPage > 0) {
-                        stringResource(R.string.last_viewed_page, entry.lastPage + 1)
-                    } else {
-                        stringResource(R.string.local_saved_auto_ocr)
-                    },
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    style = MaterialTheme.typography.bodySmall
-                )
-            }
-            Box {
-                IconButton(onClick = { menuExpanded = true }) {
-                    Icon(Icons.Default.MoreVert, contentDescription = stringResource(R.string.cd_document_menu))
-                }
-                DropdownMenu(
-                    expanded = menuExpanded,
-                    onDismissRequest = { menuExpanded = false }
+
+                Box(
+                    modifier = Modifier.align(Alignment.TopEnd)
                 ) {
-                    DropdownMenuItem(
-                        text = { Text(stringResource(R.string.action_rename)) },
-                        leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null) },
-                        onClick = {
-                            menuExpanded = false
-                            onRename()
+                    Surface(
+                        shape = CircleShape,
+                        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.90f)
+                    ) {
+                        IconButton(
+                            onClick = { menuExpanded = true },
+                            modifier = Modifier.size(38.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.MoreVert,
+                                contentDescription = stringResource(R.string.cd_document_menu)
+                            )
                         }
-                    )
-                    DropdownMenuItem(
-                        text = { Text(stringResource(R.string.action_delete)) },
-                        leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null) },
-                        onClick = {
-                            menuExpanded = false
-                            onDelete()
+                    }
+
+                    DropdownMenu(
+                        expanded = menuExpanded,
+                        onDismissRequest = { menuExpanded = false }
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.action_rename)) },
+                            leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null) },
+                            onClick = {
+                                menuExpanded = false
+                                onRename()
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.action_set_cover)) },
+                            onClick = {
+                                menuExpanded = false
+                                onSetCover()
+                            }
+                        )
+                        if (entry.hasCustomCover) {
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.action_reset_cover)) },
+                                onClick = {
+                                    menuExpanded = false
+                                    onResetCover()
+                                }
+                            )
                         }
-                    )
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.action_delete)) },
+                            leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null) },
+                            onClick = {
+                                menuExpanded = false
+                                onDelete()
+                            }
+                        )
+                    }
                 }
             }
         }
+
+        Text(
+            entry.title,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 8.dp, start = 2.dp, end = 2.dp)
+                .basicMarquee(
+                    iterations = Int.MAX_VALUE,
+                    repeatDelayMillis = 1200
+                ),
+            maxLines = 1,
+            style = MaterialTheme.typography.titleSmall
+        )
+        Text(
+            if (entry.lastPage > 0) {
+                stringResource(R.string.last_viewed_page, entry.lastPage + 1)
+            } else {
+                stringResource(R.string.local_saved_auto_ocr)
+            },
+            modifier = Modifier.padding(start = 2.dp, top = 2.dp),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            style = MaterialTheme.typography.bodySmall
+        )
     }
 }
 
