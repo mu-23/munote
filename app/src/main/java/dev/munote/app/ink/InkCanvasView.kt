@@ -171,7 +171,7 @@ class InkCanvasView(context: Context) : View(context) {
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
-        if (tool == InkTool.TEXT) return false
+        if (tool == InkTool.TEXT || tool == InkTool.IMAGE) return false
 
         // In touch-writing mode a single finger acts like the pen, but the moment a second finger
         // arrives the tentative stroke is cancelled so the parent can own pan/zoom gestures.

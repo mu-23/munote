@@ -4,9 +4,12 @@ import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.Path
+import android.graphics.RectF
 import android.graphics.pdf.PdfDocument
 import android.net.Uri
 import dev.munote.app.R
+import dev.munote.app.image.ImageStore
+import dev.munote.app.image.PageImageNote
 import dev.munote.app.ink.InkPoint
 import dev.munote.app.ink.InkStore
 import dev.munote.app.ink.InkStroke
@@ -32,6 +35,7 @@ object PdfExporter {
         session: PdfSession,
         inkStore: InkStore,
         textStore: TextStore,
+        imageStore: ImageStore,
         destination: Uri,
         targetWidthPx: Int = 1600,
         onProgress: (completedPages: Int, totalPages: Int) -> Unit = { _, _ -> },
@@ -49,6 +53,13 @@ object PdfExporter {
                 val page = document.startPage(pageInfo)
                 try {
                     page.canvas.drawBitmap(bitmap, 0f, 0f, null)
+                    ImagePdfRenderer.draw(
+                        canvas = page.canvas,
+                        store = imageStore,
+                        images = imageStore.page(pageIndex),
+                        pageWidth = bitmap.width.toFloat(),
+                        pageHeight = bitmap.height.toFloat(),
+                    )
                     InkPdfRenderer.draw(
                         canvas = page.canvas,
                         strokes = inkStore.page(pageIndex),
@@ -77,6 +88,41 @@ object PdfExporter {
             session.pageCount
         } finally {
             document.close()
+        }
+    }
+}
+
+private object ImagePdfRenderer {
+    private val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+
+    suspend fun draw(
+        canvas: Canvas,
+        store: ImageStore,
+        images: List<PageImageNote>,
+        pageWidth: Float,
+        pageHeight: Float,
+    ) {
+        images.forEach { image ->
+            val targetWidth = (image.width * pageWidth).toInt().coerceAtLeast(180)
+            val bitmap = store.loadBitmap(image, targetWidth) ?: return@forEach
+            try {
+                val left = image.x * pageWidth
+                val top = image.y * pageHeight
+                val width = image.width * pageWidth
+                val height = image.height * pageHeight
+                val destination = RectF(left, top, left + width, top + height)
+
+                canvas.save()
+                canvas.rotate(
+                    image.rotationDegrees,
+                    destination.centerX(),
+                    destination.centerY(),
+                )
+                canvas.drawBitmap(bitmap, null, destination, paint)
+                canvas.restore()
+            } finally {
+                bitmap.recycle()
+            }
         }
     }
 }

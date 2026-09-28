@@ -147,4 +147,22 @@
     <string name="action_delete_page">Delete page</string>
     <string name="action_set_page_template">Use %1$s template</string>
 
+
+    <string name="tool_image">Image</string>
+    <string name="action_insert_image">Insert image</string>
+    <string name="image_edit_hint">Tap an image to edit it. Drag to move, use the lower-right handle to resize, or rotate, crop, lock, and delete from the top controls.</string>
+    <string name="error_image_insert">Unable to insert image</string>
+    <string name="inserted_image">Inserted image</string>
+    <string name="image_crop_title">Crop image</string>
+    <string name="image_crop_left">Crop from left</string>
+    <string name="image_crop_right">Keep through right edge</string>
+    <string name="image_crop_top">Crop from top</string>
+    <string name="image_crop_bottom">Keep through bottom edge</string>
+    <string name="action_apply">Apply</string>
+    <string name="image_rotate_left">Rotate left 15°</string>
+    <string name="image_rotate_right">Rotate right 15°</string>
+    <string name="image_lock">Lock image</string>
+    <string name="image_unlock">Unlock image</string>
+    <string name="image_delete">Delete image</string>
+
 </resources>
