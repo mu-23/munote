@@ -42,6 +42,7 @@ class InkCanvasView(context: Context) : View(context) {
 
     var onStrokeCommitted: ((InkStroke) -> Unit)? = null
     var onPageMutated: ((List<InkStroke>) -> Unit)? = null
+    var onSelectionChanged: ((Boolean) -> Unit)? = null
 
     private val density = resources.displayMetrics.density
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.DITHER_FLAG).apply {
@@ -99,6 +100,73 @@ class InkCanvasView(context: Context) : View(context) {
     }
 
     fun snapshot(): List<InkStroke> = committed.toList()
+
+    fun hasSelection(): Boolean = selectedIndices.isNotEmpty()
+
+    fun deleteSelection(): Boolean {
+        if (selectedIndices.isEmpty()) return false
+        selectedIndices.sortedDescending().forEach { index ->
+            if (index in committed.indices) committed.removeAt(index)
+        }
+        clearSelection()
+        onPageMutated?.invoke(committed.toList())
+        invalidate()
+        return true
+    }
+
+    fun duplicateSelection(
+        offsetX: Float = 0.025f,
+        offsetY: Float = 0.025f,
+    ): Boolean {
+        if (selectedIndices.isEmpty()) return false
+        val copies = selectedIndices
+            .filter { it in committed.indices }
+            .map { committed[it] }
+            .map { stroke ->
+                stroke.copy(
+                    points = stroke.points.map { point ->
+                        point.copy(
+                            x = (point.x + offsetX).coerceIn(0f, 1f),
+                            y = (point.y + offsetY).coerceIn(0f, 1f),
+                        )
+                    }
+                )
+            }
+        if (copies.isEmpty()) return false
+
+        val firstNew = committed.size
+        committed.addAll(copies)
+        selectedIndices.clear()
+        for (index in firstNew until committed.size) selectedIndices += index
+        notifySelectionChanged()
+        onPageMutated?.invoke(committed.toList())
+        invalidate()
+        return true
+    }
+
+    fun scaleSelection(factor: Float): Boolean {
+        if (selectedIndices.isEmpty()) return false
+        val bounds = selectionBounds() ?: return false
+        val centerX = (bounds.left + bounds.right) * 0.5f
+        val centerY = (bounds.top + bounds.bottom) * 0.5f
+        val scale = factor.coerceIn(0.5f, 1.5f)
+
+        selectedIndices.toList().forEach { index ->
+            if (index !in committed.indices) return@forEach
+            val stroke = committed[index]
+            committed[index] = stroke.copy(
+                points = stroke.points.map { point ->
+                    point.copy(
+                        x = (centerX + (point.x - centerX) * scale).coerceIn(0f, 1f),
+                        y = (centerY + (point.y - centerY) * scale).coerceIn(0f, 1f),
+                    )
+                }
+            )
+        }
+        onPageMutated?.invoke(committed.toList())
+        invalidate()
+        return true
+    }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
         val pointer = event.actionIndex.coerceAtLeast(0)
@@ -377,6 +445,7 @@ class InkCanvasView(context: Context) : View(context) {
                 }
             }
         }
+        notifySelectionChanged()
     }
 
     private fun moveSelectionTo(nx: Float, ny: Float) {
@@ -409,11 +478,17 @@ class InkCanvasView(context: Context) : View(context) {
     }
 
     private fun clearSelection() {
+        val hadSelection = selectedIndices.isNotEmpty()
         selectedIndices.clear()
         lassoPoints.clear()
         movingSelection = false
         moveOrigin = emptyMap()
         selectionDirty = false
+        if (hadSelection) notifySelectionChanged()
+    }
+
+    private fun notifySelectionChanged() {
+        onSelectionChanged?.invoke(selectedIndices.isNotEmpty())
     }
 
     private fun selectionBounds(): RectF? {
