@@ -39,6 +39,7 @@ class InkCanvasView(context: Context) : View(context) {
     var inkColor: Int = Color.rgb(28, 29, 31)
     var penWidthDp: Float = 2.15f
     var highlighterWidthDp: Float = 12f
+    var fingerWritingEnabled: Boolean = false
 
     var onStrokeCommitted: ((InkStroke) -> Unit)? = null
     var onPageMutated: ((List<InkStroke>) -> Unit)? = null
@@ -71,6 +72,7 @@ class InkCanvasView(context: Context) : View(context) {
     private var lastInputTime = 0L
     private var drawing = false
     private var gestureTool = InkTool.PEN
+    private var activeInputWasFinger = false
 
     // Erasing is batched into one persisted edit per gesture. This makes undo useful and avoids
     // writing the ink JSON repeatedly while the eraser moves across a page.
@@ -169,17 +171,28 @@ class InkCanvasView(context: Context) : View(context) {
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
-        val pointer = event.actionIndex.coerceAtLeast(0)
+        // In touch-writing mode a single finger acts like the pen, but the moment a second finger
+        // arrives the tentative stroke is cancelled so the parent can own pan/zoom gestures.
+        if (activeInputWasFinger && event.pointerCount >= 2) {
+            cancelActiveGesture()
+            parent?.requestDisallowInterceptTouchEvent(false)
+            return false
+        }
+
+        val pointer = event.actionIndex.coerceIn(0, event.pointerCount - 1)
         val toolType = event.getToolType(pointer)
         val isStylus = toolType == MotionEvent.TOOL_TYPE_STYLUS ||
             toolType == MotionEvent.TOOL_TYPE_ERASER
-        if (!isStylus) return false
+        val isFinger = toolType == MotionEvent.TOOL_TYPE_FINGER
+        val acceptsFinger = fingerWritingEnabled && isFinger && event.pointerCount == 1
+        if (!isStylus && !acceptsFinger) return false
 
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 requestUnbufferedDispatch(event)
                 parent?.requestDisallowInterceptTouchEvent(true)
                 drawing = true
+                activeInputWasFinger = acceptsFinger
                 active.clear()
                 gestureTool = if (toolType == MotionEvent.TOOL_TYPE_ERASER) InkTool.ERASER else tool
 
@@ -263,36 +276,39 @@ class InkCanvasView(context: Context) : View(context) {
             }
 
             MotionEvent.ACTION_CANCEL -> {
-                when (gestureTool) {
-                    InkTool.ERASER -> {
-                        // A cancelled eraser gesture must not silently destroy ink.
-                        eraserBefore?.let { before ->
-                            committed.clear()
-                            committed.addAll(before)
-                        }
-                    }
-
-                    InkTool.LASSO -> {
-                        // A cancelled move is reverted to its exact original vector strokes.
-                        if (movingSelection && moveOrigin.isNotEmpty()) {
-                            restoreMoveOrigin()
-                        }
-                        lassoPoints.clear()
-                    }
-
-                    else -> Unit
-                }
-                finishGesture()
+                cancelActiveGesture()
                 return true
             }
         }
         return true
     }
 
+    private fun cancelActiveGesture() {
+        when (gestureTool) {
+            InkTool.ERASER -> {
+                eraserBefore?.let { before ->
+                    committed.clear()
+                    committed.addAll(before)
+                }
+            }
+
+            InkTool.LASSO -> {
+                if (movingSelection && moveOrigin.isNotEmpty()) {
+                    restoreMoveOrigin()
+                }
+                lassoPoints.clear()
+            }
+
+            else -> Unit
+        }
+        finishGesture()
+    }
+
     private fun finishGesture() {
         active.clear()
         lassoPoints.clear()
         drawing = false
+        activeInputWasFinger = false
         eraserBefore = null
         eraserDirty = false
         movingSelection = false
