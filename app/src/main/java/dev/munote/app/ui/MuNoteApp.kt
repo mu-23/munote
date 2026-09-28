@@ -187,6 +187,19 @@ fun MuNoteApp(initialPdf: Uri?) {
     var textStore by remember { mutableStateOf<TextStore?>(null) }
     var imageStore by remember { mutableStateOf<ImageStore?>(null) }
     var navigationStore by remember { mutableStateOf<NavigationStore?>(null) }
+
+    var splitSession by remember { mutableStateOf<PdfSession?>(null) }
+    var splitEntry by remember { mutableStateOf<LibraryEntry?>(null) }
+    var splitIndexStore by remember { mutableStateOf<OcrIndexStore?>(null) }
+    var splitHandwritingIndexStore by remember { mutableStateOf<HandwritingIndexStore?>(null) }
+    var splitInkStore by remember { mutableStateOf<InkStore?>(null) }
+    var splitTextStore by remember { mutableStateOf<TextStore?>(null) }
+    var splitImageStore by remember { mutableStateOf<ImageStore?>(null) }
+    var splitNavigationStore by remember { mutableStateOf<NavigationStore?>(null) }
+    var splitOcrDone by remember { mutableIntStateOf(0) }
+    var splitOcrRevision by remember { mutableIntStateOf(0) }
+    var showSplitPicker by remember { mutableStateOf(false) }
+
     var loadError by remember { mutableStateOf<String?>(null) }
     var ocrDone by remember { mutableIntStateOf(0) }
     var ocrRunning by remember { mutableStateOf(false) }
@@ -195,6 +208,59 @@ fun MuNoteApp(initialPdf: Uri?) {
     var libraryRevision by remember { mutableIntStateOf(0) }
     var backupRevision by remember { mutableIntStateOf(0) }
     var coverTarget by remember { mutableStateOf<LibraryEntry?>(null) }
+
+    fun closeSplit() {
+        splitSession?.close()
+        splitSession = null
+        splitEntry = null
+        splitIndexStore = null
+        splitHandwritingIndexStore = null
+        splitInkStore = null
+        splitTextStore = null
+        splitImageStore = null
+        splitNavigationStore = null
+        splitOcrDone = 0
+        splitOcrRevision++
+        showSplitPicker = false
+    }
+
+    fun attachSplitSession(next: PdfSession, entry: LibraryEntry) {
+        splitSession?.close()
+        splitSession = next
+        splitEntry = entry
+
+        val sameDocument = entry.fingerprint == currentEntry?.fingerprint
+        splitIndexStore = if (sameDocument) indexStore else OcrIndexStore(context, next.fingerprint)
+        splitHandwritingIndexStore = if (sameDocument) {
+            handwritingIndexStore
+        } else {
+            HandwritingIndexStore(context, next.fingerprint)
+        }
+        splitInkStore = if (sameDocument) inkStore else InkStore(context, next.fingerprint)
+        splitTextStore = if (sameDocument) textStore else TextStore(context, next.fingerprint)
+        splitImageStore = if (sameDocument) imageStore else ImageStore(context, next.fingerprint)
+        splitNavigationStore = if (sameDocument) {
+            navigationStore
+        } else {
+            NavigationStore(context, next.fingerprint)
+        }
+        splitOcrDone = splitIndexStore?.completedPages() ?: 0
+        splitOcrRevision++
+    }
+
+    fun openSplit(entry: LibraryEntry) {
+        scope.launch {
+            loadError = null
+            runCatching {
+                val next = PdfSession.openStored(context, entry.fingerprint)
+                val touched = library.touch(entry)
+                attachSplitSession(next, touched)
+            }.onFailure {
+                loadError = it.message ?: context.getString(R.string.error_local_pdf_open)
+                closeSplit()
+            }
+        }
+    }
 
     fun attachSession(next: PdfSession, entry: LibraryEntry) {
         session?.close()
@@ -240,6 +306,7 @@ fun MuNoteApp(initialPdf: Uri?) {
     }
 
     fun closeDocument() {
+        closeSplit()
         session?.close()
         session = null
         currentEntry = null
@@ -282,6 +349,7 @@ fun MuNoteApp(initialPdf: Uri?) {
     DisposableEffect(Unit) {
         onDispose {
             session?.close()
+            splitSession?.close()
             handwritingRecognizer.close()
         }
     }
@@ -303,7 +371,7 @@ fun MuNoteApp(initialPdf: Uri?) {
     }
 
     BackHandler(enabled = session != null) {
-        closeDocument()
+        if (splitSession != null) closeSplit() else closeDocument()
     }
 
     LaunchedEffect(session?.fingerprint) {
@@ -465,6 +533,7 @@ fun MuNoteApp(initialPdf: Uri?) {
             },
         )
     } else {
+        val renderPrimary: @Composable (Boolean) -> Unit = { splitMode ->
         ReaderScreen(
             documentTitle = currentEntry?.title ?: if (currentEntry?.kind == DocumentKind.NOTE) {
                 context.getString(R.string.default_notebook_title)
@@ -485,7 +554,7 @@ fun MuNoteApp(initialPdf: Uri?) {
             ocrRunning = ocrRunning,
             ocrRevision = ocrRevision,
             bookmarks = currentEntry?.bookmarks ?: emptySet(),
-            isNotebook = currentEntry?.kind == DocumentKind.NOTE,
+            isNotebook = currentEntry?.kind == DocumentKind.NOTE && !splitMode,
             onAddPage = {
                 currentEntry?.takeIf { it.kind == DocumentKind.NOTE }?.let { entry ->
                     scope.launch {
@@ -599,8 +668,257 @@ fun MuNoteApp(initialPdf: Uri?) {
                 }
             },
             onClose = ::closeDocument,
-            onOpenPdf = { picker.launch(arrayOf("application/pdf")) }
+            onOpenPdf = {
+                if (splitMode) showSplitPicker = true
+                else picker.launch(arrayOf("application/pdf"))
+            },
+            splitMode = splitMode,
+            onRequestSplit = { showSplitPicker = true },
+            onCloseSplit = ::closeSplit,
         )
+        }
+
+        if (showSplitPicker) {
+            SplitPickerDialog(
+                currentEntry = currentEntry,
+                entries = remember(libraryRevision) { library.entries() },
+                onDismiss = { showSplitPicker = false },
+                onSelect = { entry ->
+                    showSplitPicker = false
+                    openSplit(entry)
+                },
+            )
+        }
+
+        val renderSecondary: @Composable () -> Unit = {
+            val secondarySession = splitSession
+            val secondaryEntry = splitEntry
+            val secondaryIndex = splitIndexStore
+            val secondaryHandwriting = splitHandwritingIndexStore
+            val secondaryInk = splitInkStore
+            val secondaryText = splitTextStore
+            val secondaryImages = splitImageStore
+            val secondaryNavigation = splitNavigationStore
+
+            if (
+                secondarySession != null &&
+                secondaryEntry != null &&
+                secondaryIndex != null &&
+                secondaryHandwriting != null &&
+                secondaryInk != null &&
+                secondaryText != null &&
+                secondaryImages != null &&
+                secondaryNavigation != null
+            ) {
+                ReaderScreen(
+                    documentTitle = secondaryEntry.title,
+                    initialPage = secondaryEntry.lastPage,
+                    session = secondarySession,
+                    indexStore = secondaryIndex,
+                    handwritingIndexStore = secondaryHandwriting,
+                    handwritingRecognizer = handwritingRecognizer,
+                    handwritingModelState = handwritingModelState,
+                    inkStore = secondaryInk,
+                    textStore = secondaryText,
+                    imageStore = secondaryImages,
+                    navigationStore = secondaryNavigation,
+                    ocrDone = splitOcrDone,
+                    ocrRunning = false,
+                    ocrRevision = splitOcrRevision,
+                    bookmarks = secondaryEntry.bookmarks,
+                    isNotebook = false,
+                    onAddPage = {},
+                    onDeletePage = {},
+                    onDuplicatePage = {},
+                    onMovePage = { _, _ -> },
+                    onChangePageTemplate = { _, _ -> },
+                    onToggleBookmark = { page ->
+                        splitEntry?.let { entry ->
+                            scope.launch {
+                                splitEntry = library.toggleBookmark(entry, page)
+                            }
+                        }
+                    },
+                    onPageChanged = { page ->
+                        splitEntry?.let { entry ->
+                            scope.launch {
+                                splitEntry = library.updateLastPage(entry, page)
+                            }
+                        }
+                    },
+                    onClose = ::closeSplit,
+                    onOpenPdf = { showSplitPicker = true },
+                    splitMode = true,
+                    onRequestSplit = {},
+                    onCloseSplit = ::closeSplit,
+                )
+            }
+        }
+
+        if (splitSession == null) {
+            renderPrimary(false)
+        } else {
+            BoxWithConstraints(Modifier.fillMaxSize()) {
+                if (maxWidth >= 720.dp) {
+                    Row(Modifier.fillMaxSize()) {
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxHeight()
+                        ) {
+                            renderPrimary(true)
+                        }
+                        Box(
+                            modifier = Modifier
+                                .width(1.dp)
+                                .fillMaxHeight()
+                                .background(MaterialTheme.colorScheme.outlineVariant)
+                        )
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxHeight()
+                        ) {
+                            renderSecondary()
+                        }
+                    }
+                } else {
+                    Column(Modifier.fillMaxSize()) {
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxWidth()
+                        ) {
+                            renderPrimary(true)
+                        }
+                        Box(
+                            modifier = Modifier
+                                .height(1.dp)
+                                .fillMaxWidth()
+                                .background(MaterialTheme.colorScheme.outlineVariant)
+                        )
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxWidth()
+                        ) {
+                            renderSecondary()
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+
+@Composable
+private fun SplitPickerDialog(
+    currentEntry: LibraryEntry?,
+    entries: List<LibraryEntry>,
+    onDismiss: () -> Unit,
+    onSelect: (LibraryEntry) -> Unit,
+) {
+    val ordered = remember(entries, currentEntry?.fingerprint) {
+        entries.sortedWith(
+            compareByDescending<LibraryEntry> { it.fingerprint == currentEntry?.fingerprint }
+                .thenByDescending { it.lastOpenedAt }
+        )
+    }
+
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth(0.88f)
+                .fillMaxHeight(0.78f),
+            shape = RoundedCornerShape(24.dp),
+            tonalElevation = 6.dp
+        ) {
+            Column(Modifier.fillMaxSize()) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 18.dp, vertical = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            stringResource(R.string.split_picker_title),
+                            style = MaterialTheme.typography.titleLarge
+                        )
+                        Text(
+                            stringResource(R.string.split_picker_hint),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    TextButton(onClick = onDismiss) {
+                        Text(stringResource(R.string.action_cancel))
+                    }
+                }
+
+                LazyColumn(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth(),
+                    contentPadding = PaddingValues(
+                        start = 14.dp,
+                        end = 14.dp,
+                        bottom = 18.dp
+                    ),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    items(
+                        count = ordered.size,
+                        key = { ordered[it].fingerprint }
+                    ) { index ->
+                        val entry = ordered[index]
+                        Surface(
+                            onClick = { onSelect(entry) },
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(14.dp),
+                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.62f)
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(
+                                    horizontal = 14.dp,
+                                    vertical = 12.dp
+                                ),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(Modifier.weight(1f)) {
+                                    Text(
+                                        entry.title,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        style = MaterialTheme.typography.titleSmall
+                                    )
+                                    Text(
+                                        if (entry.fingerprint == currentEntry?.fingerprint) {
+                                            stringResource(R.string.split_same_document)
+                                        } else if (entry.kind == DocumentKind.NOTE) {
+                                            stringResource(R.string.native_notebook_pages, entry.notePageCount.coerceAtLeast(1))
+                                        } else {
+                                            stringResource(R.string.split_pdf_document)
+                                        },
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                                Text(
+                                    stringResource(R.string.action_open),
+                                    style = MaterialTheme.typography.labelLarge,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -1485,6 +1803,9 @@ private fun ReaderScreen(
     onPageChanged: (Int) -> Unit,
     onClose: () -> Unit,
     onOpenPdf: () -> Unit,
+    splitMode: Boolean,
+    onRequestSplit: () -> Unit,
+    onCloseSplit: () -> Unit,
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -1939,6 +2260,18 @@ private fun ReaderScreen(
                     TextButton(onClick = { showNavigationPanel = true }) {
                         Text(
                             stringResource(R.string.navigation_title),
+                            maxLines = 1,
+                            style = MaterialTheme.typography.labelMedium
+                        )
+                    }
+                    TextButton(
+                        onClick = if (splitMode) onCloseSplit else onRequestSplit
+                    ) {
+                        Text(
+                            stringResource(
+                                if (splitMode) R.string.action_close_split
+                                else R.string.action_split_view
+                            ),
                             maxLines = 1,
                             style = MaterialTheme.typography.labelMedium
                         )
