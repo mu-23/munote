@@ -1253,6 +1253,75 @@ private fun ReaderScreen(
 }
 
 @Composable
+private fun PageOverviewDialog(
+    session: PdfSession,
+    currentPage: Int,
+    bookmarks: Set<Int>,
+    onDismiss: () -> Unit,
+    onSelectPage: (Int) -> Unit,
+) {
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth(0.96f)
+                .fillMaxHeight(0.92f),
+            shape = RoundedCornerShape(24.dp),
+            tonalElevation = 6.dp
+        ) {
+            Column(Modifier.fillMaxSize()) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 18.dp, vertical = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            stringResource(R.string.page_overview_title),
+                            style = MaterialTheme.typography.titleLarge
+                        )
+                        Text(
+                            stringResource(R.string.page_overview_hint),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+                    TextButton(onClick = onDismiss) {
+                        Text(stringResource(R.string.action_close))
+                    }
+                }
+
+                LazyVerticalGrid(
+                    columns = GridCells.Adaptive(112.dp),
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth(),
+                    contentPadding = PaddingValues(14.dp),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    items(
+                        count = session.pageCount,
+                        key = { it }
+                    ) { page ->
+                        ThumbnailCard(
+                            session = session,
+                            pageIndex = page,
+                            selected = page == currentPage,
+                            bookmarked = page in bookmarks,
+                            onClick = { onSelectPage(page) }
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun ThumbnailRail(
     session: PdfSession,
     currentPage: Int,
