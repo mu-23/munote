@@ -51,6 +51,7 @@ import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.Gesture
 import androidx.compose.material.icons.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Redo
@@ -98,9 +99,12 @@ import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import dev.munote.app.AppLanguage
+import dev.munote.app.R
 import dev.munote.app.ink.InkCanvasView
 import dev.munote.app.ink.InkStore
 import dev.munote.app.ink.InkTool
@@ -128,7 +132,7 @@ fun MuNoteApp(initialPdf: Uri?) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val library = remember { PdfLibrary(context) }
-    val handwritingRecognizer = remember { ChineseHandwritingRecognizer() }
+    val handwritingRecognizer = remember { ChineseHandwritingRecognizer(context) }
 
     var session by remember { mutableStateOf<PdfSession?>(null) }
     var currentEntry by remember { mutableStateOf<LibraryEntry?>(null) }
@@ -163,7 +167,7 @@ fun MuNoteApp(initialPdf: Uri?) {
                 val entry = library.registerImported(next.fingerprint, title)
                 attachSession(next, entry)
             }.onFailure {
-                loadError = it.message ?: "PDF 打开失败"
+                loadError = it.message ?: context.getString(R.string.error_pdf_open)
             }
         }
     }
@@ -176,7 +180,7 @@ fun MuNoteApp(initialPdf: Uri?) {
                 val touched = library.touch(entry)
                 attachSession(next, touched)
             }.onFailure {
-                loadError = it.message ?: "本地 PDF 打开失败"
+                loadError = it.message ?: context.getString(R.string.error_local_pdf_open)
                 libraryRevision++
             }
         }
@@ -278,20 +282,20 @@ fun MuNoteApp(initialPdf: Uri?) {
                 scope.launch {
                     runCatching { library.rename(entry, title) }
                         .onSuccess { libraryRevision++ }
-                        .onFailure { loadError = it.message ?: "重命名失败" }
+                        .onFailure { loadError = it.message ?: context.getString(R.string.error_rename) }
                 }
             },
             onDelete = { entry ->
                 scope.launch {
                     runCatching { library.delete(entry) }
                         .onSuccess { libraryRevision++ }
-                        .onFailure { loadError = it.message ?: "删除失败" }
+                        .onFailure { loadError = it.message ?: context.getString(R.string.error_delete) }
                 }
             },
         )
     } else {
         ReaderScreen(
-            documentTitle = currentEntry?.title ?: "PDF 笔记",
+            documentTitle = currentEntry?.title ?: context.getString(R.string.default_pdf_note),
             initialPage = currentEntry?.lastPage ?: 0,
             session = session!!,
             indexStore = indexStore!!,
@@ -324,6 +328,51 @@ fun MuNoteApp(initialPdf: Uri?) {
 }
 
 @Composable
+private fun LanguageMenu() {
+    val context = LocalContext.current
+    var expanded by remember { mutableStateOf(false) }
+    val current = AppLanguage.current(context)
+
+    Box {
+        IconButton(onClick = { expanded = true }) {
+            Icon(
+                Icons.Default.Language,
+                contentDescription = stringResource(R.string.language)
+            )
+        }
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false }
+        ) {
+            DropdownMenuItem(
+                text = {
+                    Text(
+                        (if (current == AppLanguage.CHINESE) "✓ " else "") +
+                            stringResource(R.string.language_chinese)
+                    )
+                },
+                onClick = {
+                    expanded = false
+                    AppLanguage.set(context, AppLanguage.CHINESE)
+                }
+            )
+            DropdownMenuItem(
+                text = {
+                    Text(
+                        (if (current == AppLanguage.ENGLISH) "✓ " else "") +
+                            stringResource(R.string.language_english)
+                    )
+                },
+                onClick = {
+                    expanded = false
+                    AppLanguage.set(context, AppLanguage.ENGLISH)
+                }
+            )
+        }
+    }
+}
+
+@Composable
 private fun LibraryHome(
     entries: List<LibraryEntry>,
     error: String?,
@@ -339,13 +388,13 @@ private fun LibraryHome(
     renameTarget?.let { entry ->
         AlertDialog(
             onDismissRequest = { renameTarget = null },
-            title = { Text("重命名") },
+            title = { Text(stringResource(R.string.dialog_rename_title)) },
             text = {
                 OutlinedTextField(
                     value = renameText,
                     onValueChange = { renameText = it },
                     singleLine = true,
-                    label = { Text("文档名称") }
+                    label = { Text(stringResource(R.string.label_document_name)) }
                 )
             },
             confirmButton = {
@@ -356,11 +405,11 @@ private fun LibraryHome(
                         renameTarget = null
                     }
                 ) {
-                    Text("保存")
+                    Text(stringResource(R.string.action_save))
                 }
             },
             dismissButton = {
-                TextButton(onClick = { renameTarget = null }) { Text("取消") }
+                TextButton(onClick = { renameTarget = null }) { Text(stringResource(R.string.action_cancel)) }
             }
         )
     }
@@ -368,9 +417,9 @@ private fun LibraryHome(
     deleteTarget?.let { entry ->
         AlertDialog(
             onDismissRequest = { deleteTarget = null },
-            title = { Text("删除这个文档？") },
+            title = { Text(stringResource(R.string.dialog_delete_title)) },
             text = {
-                Text("会删除 MuNote 本地保存的 PDF、手写笔迹和识别索引。原来文件管理器里的源 PDF 不受影响。")
+                Text(stringResource(R.string.dialog_delete_message))
             },
             confirmButton = {
                 TextButton(
@@ -379,11 +428,11 @@ private fun LibraryHome(
                         deleteTarget = null
                     }
                 ) {
-                    Text("删除", color = MaterialTheme.colorScheme.error)
+                    Text(stringResource(R.string.action_delete), color = MaterialTheme.colorScheme.error)
                 }
             },
             dismissButton = {
-                TextButton(onClick = { deleteTarget = null }) { Text("取消") }
+                TextButton(onClick = { deleteTarget = null }) { Text(stringResource(R.string.action_cancel)) }
             }
         )
     }
@@ -404,11 +453,12 @@ private fun LibraryHome(
                 Column(Modifier.weight(1f)) {
                     Text("MuNote", style = MaterialTheme.typography.headlineSmall)
                     Text(
-                        "手写优先 · PDF OCR · 手写可搜索",
+                        stringResource(R.string.home_tagline),
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         style = MaterialTheme.typography.bodySmall
                     )
                 }
+                LanguageMenu()
                 Surface(
                     onClick = onImport,
                     shape = CircleShape,
@@ -420,7 +470,7 @@ private fun LibraryHome(
                         horizontalArrangement = Arrangement.spacedBy(7.dp)
                     ) {
                         Icon(Icons.Default.FolderOpen, contentDescription = null)
-                        Text("导入 PDF", style = MaterialTheme.typography.labelLarge)
+                        Text(stringResource(R.string.action_import_pdf), style = MaterialTheme.typography.labelLarge)
                     }
                 }
             }
@@ -452,11 +502,11 @@ private fun LibraryHome(
                         verticalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
                         FilledTonalIconButton(onClick = onImport, modifier = Modifier.size(58.dp)) {
-                            Icon(Icons.Default.FolderOpen, contentDescription = "导入 PDF")
+                            Icon(Icons.Default.FolderOpen, contentDescription = stringResource(R.string.action_import_pdf))
                         }
-                        Text("把教材或扫描 PDF 放进来")
+                        Text(stringResource(R.string.home_empty_title))
                         Text(
-                            "首次导入后会保存在本机资料库，之后直接打开，并记住上次阅读位置。",
+                            stringResource(R.string.home_empty_description),
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             style = MaterialTheme.typography.bodySmall
                         )
@@ -465,7 +515,7 @@ private fun LibraryHome(
             }
         } else {
             Text(
-                "最近文档",
+                stringResource(R.string.recent_documents),
                 modifier = Modifier.padding(start = 24.dp, top = 18.dp, bottom = 8.dp),
                 style = MaterialTheme.typography.titleMedium
             )
@@ -534,9 +584,9 @@ private fun LibraryDocumentRow(
                 )
                 Text(
                     if (entry.lastPage > 0) {
-                        "上次看到第 ${entry.lastPage + 1} 页 · 本地保存"
+                        stringResource(R.string.last_viewed_page, entry.lastPage + 1)
                     } else {
-                        "本地保存 · 打开后自动继续 OCR"
+                        stringResource(R.string.local_saved_auto_ocr)
                     },
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     style = MaterialTheme.typography.bodySmall
@@ -544,14 +594,14 @@ private fun LibraryDocumentRow(
             }
             Box {
                 IconButton(onClick = { menuExpanded = true }) {
-                    Icon(Icons.Default.MoreVert, contentDescription = "文档菜单")
+                    Icon(Icons.Default.MoreVert, contentDescription = stringResource(R.string.cd_document_menu))
                 }
                 DropdownMenu(
                     expanded = menuExpanded,
                     onDismissRequest = { menuExpanded = false }
                 ) {
                     DropdownMenuItem(
-                        text = { Text("重命名") },
+                        text = { Text(stringResource(R.string.action_rename)) },
                         leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null) },
                         onClick = {
                             menuExpanded = false
@@ -559,7 +609,7 @@ private fun LibraryDocumentRow(
                         }
                     )
                     DropdownMenuItem(
-                        text = { Text("删除") },
+                        text = { Text(stringResource(R.string.action_delete)) },
                         leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null) },
                         onClick = {
                             menuExpanded = false
@@ -636,13 +686,16 @@ private fun ReaderScreen(
                             exportTotal = total
                         },
                     )
-                    Toast.makeText(context, "已导出带批注 PDF", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(context, context.getString(R.string.toast_export_success), Toast.LENGTH_SHORT).show()
                 } catch (_: CancellationException) {
-                    Toast.makeText(context, "已取消导出", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(context, context.getString(R.string.toast_export_cancelled), Toast.LENGTH_SHORT).show()
                 } catch (error: Throwable) {
                     Toast.makeText(
                         context,
-                        "导出失败：${error.message ?: "未知错误"}",
+                        context.getString(
+                            R.string.error_export_failed,
+                            error.message ?: context.getString(R.string.error_export_unknown)
+                        ),
                         Toast.LENGTH_LONG
                     ).show()
                 } finally {
@@ -701,7 +754,7 @@ private fun ReaderScreen(
     if (showPageJump) {
         AlertDialog(
             onDismissRequest = { showPageJump = false },
-            title = { Text("跳转到页面") },
+            title = { Text(stringResource(R.string.dialog_jump_title)) },
             text = {
                 OutlinedTextField(
                     value = pageJumpText,
@@ -709,7 +762,7 @@ private fun ReaderScreen(
                         pageJumpText = value.filter { it.isDigit() }.take(6)
                     },
                     singleLine = true,
-                    label = { Text("页码 1-${session.pageCount}") }
+                    label = { Text(stringResource(R.string.label_page_range, session.pageCount)) }
                 )
             },
             confirmButton = {
@@ -722,11 +775,11 @@ private fun ReaderScreen(
                         showPageJump = false
                     }
                 ) {
-                    Text("跳转")
+                    Text(stringResource(R.string.action_jump))
                 }
             },
             dismissButton = {
-                TextButton(onClick = { showPageJump = false }) { Text("取消") }
+                TextButton(onClick = { showPageJump = false }) { Text(stringResource(R.string.action_cancel)) }
             }
         )
     }
@@ -746,7 +799,7 @@ private fun ReaderScreen(
                     horizontalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
                     IconButton(onClick = onClose) {
-                        Icon(Icons.Default.ArrowBack, contentDescription = "返回资料库")
+                        Icon(Icons.Default.ArrowBack, contentDescription = stringResource(R.string.cd_back_library))
                     }
                     Text(
                         documentTitle,
@@ -755,8 +808,9 @@ private fun ReaderScreen(
                         overflow = TextOverflow.Ellipsis,
                         style = MaterialTheme.typography.labelLarge
                     )
+                    LanguageMenu()
                     IconButton(onClick = onOpenPdf) {
-                        Icon(Icons.Default.FolderOpen, contentDescription = "导入另一个 PDF")
+                        Icon(Icons.Default.FolderOpen, contentDescription = stringResource(R.string.cd_import_another_pdf))
                     }
                     if (exportRunning) {
                         Row(
@@ -769,22 +823,25 @@ private fun ReaderScreen(
                                 style = MaterialTheme.typography.labelSmall
                             )
                             IconButton(onClick = { exportJob?.cancel() }) {
-                                Icon(Icons.Default.Close, contentDescription = "取消导出")
+                                Icon(Icons.Default.Close, contentDescription = stringResource(R.string.cd_cancel_export))
                             }
                         }
                     } else {
                         IconButton(
                             onClick = {
                                 exportLauncher.launch(
-                                    documentTitle.take(80).ifBlank { "MuNote" } + "-批注.pdf"
+                                    context.getString(
+                                        R.string.export_filename,
+                                        documentTitle.take(80).ifBlank { "MuNote" }
+                                    )
                                 )
                             }
                         ) {
-                            Icon(Icons.Default.FileDownload, contentDescription = "导出带批注 PDF")
+                            Icon(Icons.Default.FileDownload, contentDescription = stringResource(R.string.cd_export_annotated_pdf))
                         }
                     }
                     IconButton(onClick = { showThumbnails = !showThumbnails }) {
-                        Icon(Icons.Default.List, contentDescription = "页面缩略图")
+                        Icon(Icons.Default.List, contentDescription = stringResource(R.string.cd_page_thumbnails))
                     }
                     if (showThumbnails) {
                         IconButton(
@@ -794,9 +851,9 @@ private fun ReaderScreen(
                             Icon(
                                 if (showBookmarksOnly) Icons.Default.Star else Icons.Default.StarBorder,
                                 contentDescription = if (showBookmarksOnly) {
-                                    "显示全部页面"
+                                    stringResource(R.string.cd_show_all_pages)
                                 } else {
-                                    "只看书签页"
+                                    stringResource(R.string.cd_bookmarks_only)
                                 }
                             )
                         }
@@ -806,9 +863,9 @@ private fun ReaderScreen(
                             if (pager.currentPage in bookmarks) Icons.Default.Star
                             else Icons.Default.StarBorder,
                             contentDescription = if (pager.currentPage in bookmarks) {
-                                "取消书签"
+                                stringResource(R.string.cd_remove_bookmark)
                             } else {
-                                "添加书签"
+                                stringResource(R.string.cd_add_bookmark)
                             }
                         )
                     }
@@ -820,20 +877,20 @@ private fun ReaderScreen(
                         },
                         modifier = Modifier.weight(1f),
                         singleLine = true,
-                        placeholder = { Text("搜索 PDF 和手写内容") },
+                        placeholder = { Text(stringResource(R.string.search_placeholder)) },
                         leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
                         shape = RoundedCornerShape(18.dp)
                     )
                     if (hits.isNotEmpty()) {
                         IconButton(onClick = { scope.launch { goToHit(selectedHit - 1) } }) {
-                            Icon(Icons.Default.KeyboardArrowLeft, contentDescription = "上一个搜索结果")
+                            Icon(Icons.Default.KeyboardArrowLeft, contentDescription = stringResource(R.string.cd_previous_search_result))
                         }
                         Text(
                             "${selectedHit + 1}/${hits.size}",
                             style = MaterialTheme.typography.labelMedium
                         )
                         IconButton(onClick = { scope.launch { goToHit(selectedHit + 1) } }) {
-                            Icon(Icons.Default.KeyboardArrowRight, contentDescription = "下一个搜索结果")
+                            Icon(Icons.Default.KeyboardArrowRight, contentDescription = stringResource(R.string.cd_next_search_result))
                         }
                     }
                     if (ocrRunning) {
@@ -850,12 +907,12 @@ private fun ReaderScreen(
                     }
                     when (handwritingModelState) {
                         HandwritingModelState.DOWNLOADING -> Text(
-                            "手写模型下载中",
+                            stringResource(R.string.handwriting_model_downloading),
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             style = MaterialTheme.typography.labelSmall
                         )
                         HandwritingModelState.ERROR -> Text(
-                            "手写识别不可用",
+                            stringResource(R.string.handwriting_unavailable),
                             color = MaterialTheme.colorScheme.error,
                             style = MaterialTheme.typography.labelSmall
                         )
@@ -867,10 +924,10 @@ private fun ReaderScreen(
                     if (hits.isEmpty()) {
                         Text(
                             when {
-                                ocrRunning -> "正在继续识别 PDF，当前暂无匹配"
+                                ocrRunning -> stringResource(R.string.search_pdf_processing)
                                 handwritingModelState == HandwritingModelState.DOWNLOADING ->
-                                    "手写识别模型下载中，PDF 搜索仍可用"
-                                else -> "没有找到"
+                                    stringResource(R.string.search_handwriting_model_downloading)
+                                else -> stringResource(R.string.search_no_results)
                             },
                             modifier = Modifier.padding(horizontal = 18.dp, vertical = 5.dp),
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -889,9 +946,18 @@ private fun ReaderScreen(
                                     onClick = { scope.launch { goToHit(index) } },
                                     label = {
                                         val sourceLabel =
-                                            if (hit.source == SearchSource.HANDWRITING) "手写" else "PDF"
+                                            if (hit.source == SearchSource.HANDWRITING) {
+                                                stringResource(R.string.search_source_handwriting)
+                                            } else {
+                                                stringResource(R.string.search_source_pdf)
+                                            }
                                         Text(
-                                            "第 ${hit.pageIndex + 1} 页 · $sourceLabel · ${hit.snippet}",
+                                            stringResource(
+                                                R.string.search_result_label,
+                                                hit.pageIndex + 1,
+                                                sourceLabel,
+                                                hit.snippet
+                                            ),
                                             maxLines = 1
                                         )
                                     }
@@ -995,7 +1061,7 @@ private fun ReaderScreen(
             ) {
                 ToolButton(
                     selected = tool == InkTool.PEN,
-                    label = "钢笔",
+                    label = stringResource(R.string.tool_pen),
                     icon = { Icon(Icons.Default.Brush, contentDescription = null) },
                     onClick = {
                         if (tool == InkTool.PEN) showPenOptions = !showPenOptions
@@ -1008,7 +1074,7 @@ private fun ReaderScreen(
                 Spacer(Modifier.width(8.dp))
                 ToolButton(
                     selected = tool == InkTool.HIGHLIGHTER,
-                    label = "荧光",
+                    label = stringResource(R.string.tool_highlighter),
                     icon = { Text("▰") },
                     onClick = {
                         if (tool == InkTool.HIGHLIGHTER) showPenOptions = !showPenOptions
@@ -1021,7 +1087,7 @@ private fun ReaderScreen(
                 Spacer(Modifier.width(8.dp))
                 ToolButton(
                     selected = tool == InkTool.ERASER,
-                    label = "橡皮",
+                    label = stringResource(R.string.tool_eraser),
                     icon = { Icon(Icons.Default.Clear, contentDescription = null) },
                     onClick = {
                         tool = InkTool.ERASER
@@ -1031,7 +1097,7 @@ private fun ReaderScreen(
                 Spacer(Modifier.width(8.dp))
                 ToolButton(
                     selected = tool == InkTool.LASSO,
-                    label = "套索",
+                    label = stringResource(R.string.tool_lasso),
                     icon = { Icon(Icons.Default.Gesture, contentDescription = null) },
                     onClick = {
                         tool = InkTool.LASSO
@@ -1041,16 +1107,16 @@ private fun ReaderScreen(
                 if (tool == InkTool.LASSO && lassoSelectionActive) {
                     Spacer(Modifier.width(6.dp))
                     IconButton(onClick = { activeInkView?.duplicateSelection() }) {
-                        Icon(Icons.Default.ContentCopy, contentDescription = "复制选中笔迹")
+                        Icon(Icons.Default.ContentCopy, contentDescription = stringResource(R.string.cd_copy_selection))
                     }
                     IconButton(onClick = { activeInkView?.scaleSelection(0.9f) }) {
-                        Icon(Icons.Default.ZoomOut, contentDescription = "缩小选中笔迹")
+                        Icon(Icons.Default.ZoomOut, contentDescription = stringResource(R.string.cd_shrink_selection))
                     }
                     IconButton(onClick = { activeInkView?.scaleSelection(1.1f) }) {
-                        Icon(Icons.Default.ZoomIn, contentDescription = "放大选中笔迹")
+                        Icon(Icons.Default.ZoomIn, contentDescription = stringResource(R.string.cd_grow_selection))
                     }
                     IconButton(onClick = { activeInkView?.deleteSelection() }) {
-                        Icon(Icons.Default.Delete, contentDescription = "删除选中笔迹")
+                        Icon(Icons.Default.Delete, contentDescription = stringResource(R.string.cd_delete_selection))
                     }
                 }
                 Spacer(Modifier.width(14.dp))
@@ -1063,7 +1129,7 @@ private fun ReaderScreen(
                         }
                     }
                 ) {
-                    Icon(Icons.Default.Undo, contentDescription = "撤销")
+                    Icon(Icons.Default.Undo, contentDescription = stringResource(R.string.cd_undo))
                 }
                 IconButton(
                     enabled = inkStore.canRedo(pager.currentPage),
@@ -1074,7 +1140,7 @@ private fun ReaderScreen(
                         }
                     }
                 ) {
-                    Icon(Icons.Default.Redo, contentDescription = "重做")
+                    Icon(Icons.Default.Redo, contentDescription = stringResource(R.string.cd_redo))
                 }
                 Spacer(Modifier.width(12.dp))
                 IconButton(
@@ -1084,7 +1150,7 @@ private fun ReaderScreen(
                         }
                     }
                 ) {
-                    Icon(Icons.Default.ArrowBack, contentDescription = "上一页")
+                    Icon(Icons.Default.ArrowBack, contentDescription = stringResource(R.string.cd_previous_page))
                 }
                 Surface(
                     onClick = {
@@ -1109,7 +1175,7 @@ private fun ReaderScreen(
                         }
                     }
                 ) {
-                    Icon(Icons.Default.ArrowForward, contentDescription = "下一页")
+                    Icon(Icons.Default.ArrowForward, contentDescription = stringResource(R.string.cd_next_page))
                 }
             }
         }
@@ -1211,7 +1277,7 @@ private fun ThumbnailCard(
             } else {
                 Image(
                     bitmap = bmp.asImageBitmap(),
-                    contentDescription = "第 ${pageIndex + 1} 页缩略图",
+                    contentDescription = stringResource(R.string.cd_page_thumbnail, pageIndex + 1),
                     modifier = Modifier
                         .fillMaxWidth()
                         .aspectRatio(bmp.width.toFloat() / bmp.height.toFloat()),
@@ -1287,7 +1353,11 @@ private fun PenOptionsBar(
             horizontalArrangement = Arrangement.spacedBy(9.dp)
         ) {
             Text(
-                if (isHighlighter) "荧光笔" else "钢笔",
+                if (isHighlighter) {
+                    stringResource(R.string.tool_highlighter_full)
+                } else {
+                    stringResource(R.string.tool_pen)
+                },
                 style = MaterialTheme.typography.labelLarge
             )
             widths.forEach { width ->
@@ -1515,7 +1585,7 @@ private fun PdfInkPage(
             Box(Modifier.fillMaxSize()) {
                 Image(
                     bitmap = bmp.asImageBitmap(),
-                    contentDescription = "PDF 第 ${pageIndex + 1} 页",
+                    contentDescription = stringResource(R.string.cd_pdf_page, pageIndex + 1),
                     modifier = Modifier.fillMaxSize(),
                     contentScale = ContentScale.FillBounds
                 )
@@ -1601,7 +1671,7 @@ private fun PdfInkPage(
                 tonalElevation = 2.dp
             ) {
                 Text(
-                    "${(scale * 100).roundToInt()}% · 适合页面",
+                    stringResource(R.string.zoom_fit_label, (scale * 100).roundToInt()),
                     modifier = Modifier.padding(horizontal = 11.dp, vertical = 7.dp),
                     style = MaterialTheme.typography.labelMedium
                 )

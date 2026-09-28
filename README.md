@@ -1,36 +1,40 @@
 # MuNote
 
-Android tablet handwriting + searchable scanned-PDF notebook.
+[English](README_EN.md)
 
-MuNote is a clean-room, local-first Android project aimed at combining a Notein-like handwriting experience with the search/OCR workflow that makes scanned textbooks practical to study.
+面向 Android 平板的手写笔记 + 可搜索扫描 PDF 应用。
 
-## Current features
+MuNote 是一个本地优先、clean-room 实现的 Android 项目，目标是把接近 Notein 的手写体验，与扫描教材所需要的 OCR / 搜索 / 跳页能力结合起来。
 
-- Native Android stylus ink with historical digitizer samples
-- Pressure + velocity-aware variable-width pen
-- Highlighter, stroke eraser, undo/redo
-- Stylus lasso selection with move, copy, resize, and delete
-- Finger-only pinch zoom, pan, and page swipe
-- PDF import with a persistent local document library
-- Resume at the last viewed page
-- Page thumbnail rail, persistent bookmarks, bookmark-only filtering, and direct page jump
-- On-device Simplified Chinese scanned-PDF OCR
-- Search scanned/image-only PDF text, jump to matches, and highlight the OCR region
-- On-device Chinese digital-ink recognition for the user's own handwriting
-- Unified search across PDF OCR and handwritten ink
-- Flattened PDF export with handwritten annotations, progress, and cancellation
-- Rename/delete local library documents
-- OCR prioritization around the saved reading position for large scanned textbooks
-- No account required and no paid OCR API
+## 当前功能
 
-The original imported PDF is kept separate from editable MuNote ink. Editing does not destructively rewrite the source PDF.
+- 原生 Android 触控笔输入，保留高频历史采样
+- 压感 + 书写速度共同影响笔宽
+- 钢笔、荧光笔、橡皮擦、撤销 / 重做
+- 套索选择，支持移动、复制、缩放、删除
+- 手指双指缩放、拖动和翻页，和触控笔书写分离
+- PDF 导入和本地资料库
+- 自动记住上次阅读页
+- 页面缩略图、书签、仅看书签页、直接输入页码跳转
+- 本地简体中文扫描 PDF OCR
+- 图片 / 扫描 PDF 关键词搜索、跳页和命中区域高亮
+- 本地中文手写识别
+- 统一搜索 PDF OCR 文字和自己的手写内容
+- 导出带手写批注的 PDF，并显示进度、支持取消
+- 本地文档重命名 / 删除
+- 大型扫描教材会优先 OCR 当前阅读位置附近的页面
+- 不需要账号，也不依赖付费 OCR API
+- 中文 / English 双语界面，**首次安装默认中文**
 
-## Status
+导入的原始 PDF 和 MuNote 的可编辑手写笔迹分开保存，编辑不会破坏原文件。
 
-The core workflow now builds successfully in GitHub Actions and is ready for repeated real-device testing.
+## 当前状态
 
-The biggest remaining quality gate is handwriting feel on the target tablet: smoothing, pressure curve, velocity thinning, pen-down/pen-up behavior, palm rejection, and model-specific stylus button handling all need real hardware feedback before they should be considered final.
+核心流程已经能够通过 GitHub Actions 正常构建，并进入真机反复测试阶段。
 
-See:
+目前最大的质量门仍然是目标平板上的实际笔感。坐标平滑、压感曲线、速度收细、起笔 / 收笔、掌托误触，以及特定型号触控笔侧键行为，都需要结合真机反馈继续调校。
+
+技术细节：
+
 - `docs/RESEARCH.md`
 - `docs/ARCHITECTURE.md`

@@ -1,3 +1,84 @@
 <resources>
     <string name="app_name">MuNote</string>
+    <string name="default_pdf_note">PDF 笔记</string>
+
+    <string name="error_pdf_open">PDF 打开失败</string>
+    <string name="error_local_pdf_open">本地 PDF 打开失败</string>
+    <string name="error_rename">重命名失败</string>
+    <string name="error_delete">删除失败</string>
+    <string name="error_export_unknown">未知错误</string>
+    <string name="error_export_failed">导出失败：%1$s</string>
+    <string name="error_output_create">无法创建导出文件</string>
+    <string name="error_input_open">无法打开 PDF</string>
+    <string name="error_local_pdf_missing">本地 PDF 已不存在</string>
+    <string name="error_handwriting_model_missing">没有找到简体中文数字墨水模型</string>
+
+    <string name="dialog_rename_title">重命名</string>
+    <string name="label_document_name">文档名称</string>
+    <string name="action_save">保存</string>
+    <string name="action_cancel">取消</string>
+    <string name="action_delete">删除</string>
+    <string name="action_rename">重命名</string>
+    <string name="action_import_pdf">导入 PDF</string>
+    <string name="dialog_delete_title">删除这个文档？</string>
+    <string name="dialog_delete_message">会删除 MuNote 本地保存的 PDF、手写笔迹和识别索引。原来文件管理器里的源 PDF 不受影响。</string>
+
+    <string name="home_tagline">手写优先 · PDF OCR · 手写可搜索</string>
+    <string name="home_empty_title">把教材或扫描 PDF 放进来</string>
+    <string name="home_empty_description">首次导入后会保存在本机资料库，之后直接打开，并记住上次阅读位置。</string>
+    <string name="recent_documents">最近文档</string>
+    <string name="last_viewed_page">上次看到第 %1$d 页 · 本地保存</string>
+    <string name="local_saved_auto_ocr">本地保存 · 打开后自动继续 OCR</string>
+
+    <string name="toast_export_success">已导出带批注 PDF</string>
+    <string name="toast_export_cancelled">已取消导出</string>
+    <string name="export_filename">%1$s-批注.pdf</string>
+
+    <string name="dialog_jump_title">跳转到页面</string>
+    <string name="label_page_range">页码 1-%1$d</string>
+    <string name="action_jump">跳转</string>
+
+    <string name="cd_back_library">返回资料库</string>
+    <string name="cd_import_another_pdf">导入另一个 PDF</string>
+    <string name="cd_cancel_export">取消导出</string>
+    <string name="cd_export_annotated_pdf">导出带批注 PDF</string>
+    <string name="cd_page_thumbnails">页面缩略图</string>
+    <string name="cd_show_all_pages">显示全部页面</string>
+    <string name="cd_bookmarks_only">只看书签页</string>
+    <string name="cd_remove_bookmark">取消书签</string>
+    <string name="cd_add_bookmark">添加书签</string>
+    <string name="cd_previous_search_result">上一个搜索结果</string>
+    <string name="cd_next_search_result">下一个搜索结果</string>
+    <string name="cd_copy_selection">复制选中笔迹</string>
+    <string name="cd_shrink_selection">缩小选中笔迹</string>
+    <string name="cd_grow_selection">放大选中笔迹</string>
+    <string name="cd_delete_selection">删除选中笔迹</string>
+    <string name="cd_undo">撤销</string>
+    <string name="cd_redo">重做</string>
+    <string name="cd_previous_page">上一页</string>
+    <string name="cd_next_page">下一页</string>
+    <string name="cd_document_menu">文档菜单</string>
+    <string name="cd_page_thumbnail">第 %1$d 页缩略图</string>
+    <string name="cd_pdf_page">PDF 第 %1$d 页</string>
+
+    <string name="search_placeholder">搜索 PDF 和手写内容</string>
+    <string name="handwriting_model_downloading">手写模型下载中</string>
+    <string name="handwriting_unavailable">手写识别不可用</string>
+    <string name="search_pdf_processing">正在继续识别 PDF，当前暂无匹配</string>
+    <string name="search_handwriting_model_downloading">手写识别模型下载中，PDF 搜索仍可用</string>
+    <string name="search_no_results">没有找到</string>
+    <string name="search_source_handwriting">手写</string>
+    <string name="search_source_pdf">PDF</string>
+    <string name="search_result_label">第 %1$d 页 · %2$s · %3$s</string>
+
+    <string name="tool_pen">钢笔</string>
+    <string name="tool_highlighter">荧光</string>
+    <string name="tool_eraser">橡皮</string>
+    <string name="tool_lasso">套索</string>
+    <string name="tool_highlighter_full">荧光笔</string>
+    <string name="zoom_fit_label">%1$d%% · 适合页面</string>
+
+    <string name="language">语言</string>
+    <string name="language_chinese">中文</string>
+    <string name="language_english">English</string>
 </resources>

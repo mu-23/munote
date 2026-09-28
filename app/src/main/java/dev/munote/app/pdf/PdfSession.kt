@@ -7,6 +7,7 @@ import android.graphics.pdf.PdfRenderer
 import android.net.Uri
 import android.os.ParcelFileDescriptor
 import android.util.LruCache
+import dev.munote.app.R
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -65,7 +66,7 @@ class PdfSession private constructor(
             val docsDir = File(context.filesDir, "documents").apply { mkdirs() }
             val temp = File(docsDir, "import-${System.currentTimeMillis()}.pdf")
             context.contentResolver.openInputStream(uri).use { input ->
-                requireNotNull(input) { "无法打开 PDF" }
+                requireNotNull(input) { context.getString(R.string.error_input_open) }
                 FileOutputStream(temp).use { output -> input.copyTo(output, 1024 * 1024) }
             }
             val fingerprint = sha256(temp)
@@ -79,7 +80,7 @@ class PdfSession private constructor(
             fingerprint: String,
         ): PdfSession = withContext(Dispatchers.IO) {
             val file = File(File(context.filesDir, "documents"), "${fingerprint}.pdf")
-            require(file.exists()) { "本地 PDF 已不存在" }
+            require(file.exists()) { context.getString(R.string.error_local_pdf_missing) }
             openFile(file, fingerprint)
         }
 

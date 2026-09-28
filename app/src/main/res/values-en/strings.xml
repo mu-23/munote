@@ -1,0 +1,84 @@
+<resources>
+    <string name="app_name">MuNote</string>
+    <string name="default_pdf_note">PDF Note</string>
+
+    <string name="error_pdf_open">Could not open PDF</string>
+    <string name="error_local_pdf_open">Could not open local PDF</string>
+    <string name="error_rename">Rename failed</string>
+    <string name="error_delete">Delete failed</string>
+    <string name="error_export_unknown">Unknown error</string>
+    <string name="error_export_failed">Export failed: %1$s</string>
+    <string name="error_output_create">Could not create export file</string>
+    <string name="error_input_open">Could not open PDF</string>
+    <string name="error_local_pdf_missing">The local PDF no longer exists</string>
+    <string name="error_handwriting_model_missing">Simplified Chinese digital ink model is unavailable</string>
+
+    <string name="dialog_rename_title">Rename</string>
+    <string name="label_document_name">Document name</string>
+    <string name="action_save">Save</string>
+    <string name="action_cancel">Cancel</string>
+    <string name="action_delete">Delete</string>
+    <string name="action_rename">Rename</string>
+    <string name="action_import_pdf">Import PDF</string>
+    <string name="dialog_delete_title">Delete this document?</string>
+    <string name="dialog_delete_message">This removes the local MuNote PDF copy, handwriting, and recognition indexes. The original PDF in your file manager is not affected.</string>
+
+    <string name="home_tagline">Handwriting first · PDF OCR · Search your ink</string>
+    <string name="home_empty_title">Add a textbook or scanned PDF</string>
+    <string name="home_empty_description">After the first import, MuNote keeps a local copy so you can reopen it directly and resume from where you stopped.</string>
+    <string name="recent_documents">Recent documents</string>
+    <string name="last_viewed_page">Last viewed: page %1$d · Saved locally</string>
+    <string name="local_saved_auto_ocr">Saved locally · OCR resumes automatically</string>
+
+    <string name="toast_export_success">Annotated PDF exported</string>
+    <string name="toast_export_cancelled">Export cancelled</string>
+    <string name="export_filename">%1$s-annotated.pdf</string>
+
+    <string name="dialog_jump_title">Go to page</string>
+    <string name="label_page_range">Page 1-%1$d</string>
+    <string name="action_jump">Go</string>
+
+    <string name="cd_back_library">Back to library</string>
+    <string name="cd_import_another_pdf">Import another PDF</string>
+    <string name="cd_cancel_export">Cancel export</string>
+    <string name="cd_export_annotated_pdf">Export annotated PDF</string>
+    <string name="cd_page_thumbnails">Page thumbnails</string>
+    <string name="cd_show_all_pages">Show all pages</string>
+    <string name="cd_bookmarks_only">Show bookmarks only</string>
+    <string name="cd_remove_bookmark">Remove bookmark</string>
+    <string name="cd_add_bookmark">Add bookmark</string>
+    <string name="cd_previous_search_result">Previous search result</string>
+    <string name="cd_next_search_result">Next search result</string>
+    <string name="cd_copy_selection">Copy selected ink</string>
+    <string name="cd_shrink_selection">Shrink selected ink</string>
+    <string name="cd_grow_selection">Enlarge selected ink</string>
+    <string name="cd_delete_selection">Delete selected ink</string>
+    <string name="cd_undo">Undo</string>
+    <string name="cd_redo">Redo</string>
+    <string name="cd_previous_page">Previous page</string>
+    <string name="cd_next_page">Next page</string>
+    <string name="cd_document_menu">Document menu</string>
+    <string name="cd_page_thumbnail">Page %1$d thumbnail</string>
+    <string name="cd_pdf_page">PDF page %1$d</string>
+
+    <string name="search_placeholder">Search PDF and handwriting</string>
+    <string name="handwriting_model_downloading">Downloading handwriting model</string>
+    <string name="handwriting_unavailable">Handwriting recognition unavailable</string>
+    <string name="search_pdf_processing">PDF recognition is still running. No matches yet.</string>
+    <string name="search_handwriting_model_downloading">Handwriting model is downloading. PDF search still works.</string>
+    <string name="search_no_results">No results</string>
+    <string name="search_source_handwriting">Handwriting</string>
+    <string name="search_source_pdf">PDF</string>
+    <string name="search_result_label">Page %1$d · %2$s · %3$s</string>
+
+    <string name="tool_pen">Pen</string>
+    <string name="tool_highlighter">Highlight</string>
+    <string name="tool_eraser">Eraser</string>
+    <string name="tool_lasso">Lasso</string>
+    <string name="tool_highlighter_full">Highlighter</string>
+    <string name="zoom_fit_label">%1$d%% · Fit page</string>
+
+    <string name="language">Language</string>
+    <string name="language_chinese">中文</string>
+    <string name="language_english">English</string>
+</resources>
