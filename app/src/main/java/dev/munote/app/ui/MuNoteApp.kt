@@ -418,6 +418,9 @@ private fun ReaderScreen(
     documentTitle: String,
     session: PdfSession,
     indexStore: OcrIndexStore,
+    handwritingIndexStore: HandwritingIndexStore,
+    handwritingRecognizer: ChineseHandwritingRecognizer,
+    handwritingModelState: HandwritingModelState,
     inkStore: InkStore,
     ocrDone: Int,
     ocrRunning: Boolean,
@@ -433,6 +436,7 @@ private fun ReaderScreen(
 
     var tool by remember { mutableStateOf(InkTool.PEN) }
     var inkRevision by remember { mutableIntStateOf(0) }
+    var handwritingRevision by remember { mutableIntStateOf(0) }
     var showThumbnails by remember { mutableStateOf(false) }
     var showPenOptions by remember { mutableStateOf(false) }
 
@@ -447,8 +451,31 @@ private fun ReaderScreen(
         pager.animateScrollToPage(hits[selectedHit].pageIndex)
     }
 
-    LaunchedEffect(query, ocrRevision) {
-        hits = indexStore.search(query)
+    LaunchedEffect(session.fingerprint, handwritingModelState) {
+        if (handwritingModelState != HandwritingModelState.READY) return@LaunchedEffect
+        for (page in inkStore.pageIndices()) {
+            val blocks = handwritingRecognizer.recognizePage(inkStore.page(page))
+            handwritingIndexStore.put(page, blocks)
+            handwritingRevision++
+        }
+    }
+
+    // Re-index the current page only after the user pauses writing. Continuous pen strokes keep
+    // cancelling this delay, so handwriting recognition never runs in the latency-critical path.
+    LaunchedEffect(inkRevision, pager.currentPage, handwritingModelState) {
+        if (inkRevision == 0 || handwritingModelState != HandwritingModelState.READY) {
+            return@LaunchedEffect
+        }
+        delay(700)
+        val page = pager.currentPage
+        val blocks = handwritingRecognizer.recognizePage(inkStore.page(page))
+        handwritingIndexStore.put(page, blocks)
+        handwritingRevision++
+    }
+
+    LaunchedEffect(query, ocrRevision, handwritingRevision) {
+        hits = (indexStore.search(query) + handwritingIndexStore.search(query))
+            .sortedWith(compareBy<SearchHit> { it.pageIndex }.thenBy { it.source.ordinal })
         selectedHit = selectedHit.coerceIn(0, (hits.size - 1).coerceAtLeast(0))
     }
 
