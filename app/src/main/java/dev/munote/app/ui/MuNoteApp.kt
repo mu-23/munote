@@ -476,6 +476,7 @@ private fun LibraryHome(
     entries: List<LibraryEntry>,
     error: String?,
     onImport: () -> Unit,
+    onCreateNote: (String, PageTemplate) -> Unit,
     onOpen: (LibraryEntry) -> Unit,
     onRename: (LibraryEntry, String) -> Unit,
     onDelete: (LibraryEntry) -> Unit,
@@ -485,6 +486,70 @@ private fun LibraryHome(
     var renameTarget by remember { mutableStateOf<LibraryEntry?>(null) }
     var renameText by remember { mutableStateOf("") }
     var deleteTarget by remember { mutableStateOf<LibraryEntry?>(null) }
+    var showNewNotebook by remember { mutableStateOf(false) }
+    var newNotebookTitle by remember { mutableStateOf("") }
+    var newNotebookTemplate by remember { mutableStateOf(PageTemplate.BLANK) }
+
+    if (showNewNotebook) {
+        AlertDialog(
+            onDismissRequest = { showNewNotebook = false },
+            title = { Text(stringResource(R.string.dialog_new_notebook_title)) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    OutlinedTextField(
+                        value = newNotebookTitle,
+                        onValueChange = { newNotebookTitle = it },
+                        singleLine = true,
+                        label = { Text(stringResource(R.string.label_notebook_name)) }
+                    )
+                    Text(
+                        stringResource(R.string.label_page_template),
+                        style = MaterialTheme.typography.labelLarge
+                    )
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        listOf(
+                            PageTemplate.BLANK to R.string.template_blank,
+                            PageTemplate.RULED to R.string.template_ruled,
+                            PageTemplate.GRID to R.string.template_grid,
+                            PageTemplate.DOT to R.string.template_dot,
+                        ).forEach { (template, labelRes) ->
+                            AssistChip(
+                                onClick = { newNotebookTemplate = template },
+                                label = {
+                                    Text(
+                                        (if (newNotebookTemplate == template) "✓ " else "") +
+                                            stringResource(labelRes)
+                                    )
+                                }
+                            )
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        onCreateNote(newNotebookTitle, newNotebookTemplate)
+                        newNotebookTitle = ""
+                        newNotebookTemplate = PageTemplate.BLANK
+                        showNewNotebook = false
+                    }
+                ) {
+                    Text(stringResource(R.string.action_create))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showNewNotebook = false }) {
+                    Text(stringResource(R.string.action_cancel))
+                }
+            }
+        )
+    }
 
     renameTarget?.let { entry ->
         AlertDialog(
@@ -566,6 +631,23 @@ private fun LibraryHome(
                 }
                 LanguageMenu()
                 Surface(
+                    onClick = { showNewNotebook = true },
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.primaryContainer
+                ) {
+                    Row(
+                        Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Icon(Icons.Default.Add, contentDescription = null)
+                        Text(
+                            stringResource(R.string.action_new_notebook),
+                            style = MaterialTheme.typography.labelLarge
+                        )
+                    }
+                }
+                                Surface(
                     onClick = onImport,
                     shape = CircleShape,
                     color = MaterialTheme.colorScheme.primaryContainer
@@ -610,11 +692,25 @@ private fun LibraryHome(
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
-                        FilledTonalIconButton(onClick = onImport, modifier = Modifier.size(58.dp)) {
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            FilledTonalIconButton(
+                                onClick = { showNewNotebook = true },
+                                modifier = Modifier.size(58.dp)
+                            ) {
+                                Icon(
+                                    Icons.Default.Add,
+                                    contentDescription = stringResource(R.string.action_new_notebook)
+                                )
+                            }
+                                                    FilledTonalIconButton(onClick = onImport, modifier = Modifier.size(58.dp)) {
                             Icon(
                                 Icons.Default.FolderOpen,
                                 contentDescription = stringResource(R.string.action_import_pdf)
                             )
+                        }
                         }
                         Text(stringResource(R.string.home_empty_title))
                         Text(
@@ -788,10 +884,16 @@ private fun LibraryDocumentCard(
             style = MaterialTheme.typography.titleSmall
         )
         Text(
-            if (entry.lastPage > 0) {
-                stringResource(R.string.last_viewed_page, entry.lastPage + 1)
-            } else {
-                stringResource(R.string.local_saved_auto_ocr)
+            when {
+                entry.kind == DocumentKind.NOTE ->
+                    stringResource(
+                        R.string.native_notebook_pages,
+                        entry.notePageCount.coerceAtLeast(1)
+                    )
+                entry.lastPage > 0 ->
+                    stringResource(R.string.last_viewed_page, entry.lastPage + 1)
+                else ->
+                    stringResource(R.string.local_saved_auto_ocr)
             },
             modifier = Modifier.padding(start = 2.dp, top = 2.dp),
             maxLines = 1,
@@ -818,6 +920,8 @@ private fun ReaderScreen(
     ocrRunning: Boolean,
     ocrRevision: Int,
     bookmarks: Set<Int>,
+    isNotebook: Boolean,
+    onAddPage: () -> Unit,
     onToggleBookmark: (Int) -> Unit,
     onPageChanged: (Int) -> Unit,
     onClose: () -> Unit,
@@ -1468,6 +1572,15 @@ private fun ReaderScreen(
                     }
                 ) {
                     Icon(Icons.Default.ArrowForward, contentDescription = stringResource(R.string.cd_next_page))
+                }
+                if (isNotebook) {
+                    Spacer(Modifier.width(6.dp))
+                    IconButton(onClick = onAddPage) {
+                        Icon(
+                            Icons.Default.Add,
+                            contentDescription = stringResource(R.string.cd_add_page)
+                        )
+                    }
                 }
             }
         }
