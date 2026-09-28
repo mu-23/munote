@@ -125,6 +125,8 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import dev.munote.app.AppLanguage
 import dev.munote.app.R
+import dev.munote.app.backup.LocalBackupInfo
+import dev.munote.app.backup.LocalBackupManager
 import dev.munote.app.ink.InkCanvasView
 import dev.munote.app.ink.InkStore
 import dev.munote.app.ink.InkTool
@@ -137,6 +139,7 @@ import dev.munote.app.ocr.SearchHit
 import dev.munote.app.ocr.SearchSource
 import dev.munote.app.pdf.DocumentKind
 import dev.munote.app.pdf.LibraryEntry
+import dev.munote.app.pdf.LibraryFolder
 import dev.munote.app.pdf.PageTemplate
 import dev.munote.app.pdf.PdfExporter
 import dev.munote.app.pdf.PdfLibrary
@@ -156,6 +159,7 @@ fun MuNoteApp(initialPdf: Uri?) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val library = remember { PdfLibrary(context) }
+    val backupManager = remember { LocalBackupManager(context) }
     val handwritingRecognizer = remember { ChineseHandwritingRecognizer(context) }
 
     var session by remember { mutableStateOf<PdfSession?>(null) }
@@ -170,6 +174,7 @@ fun MuNoteApp(initialPdf: Uri?) {
     var ocrRevision by remember { mutableIntStateOf(0) }
     var handwritingModelState by remember { mutableStateOf(HandwritingModelState.NOT_READY) }
     var libraryRevision by remember { mutableIntStateOf(0) }
+    var backupRevision by remember { mutableIntStateOf(0) }
     var coverTarget by remember { mutableStateOf<LibraryEntry?>(null) }
 
     fun attachSession(next: PdfSession, entry: LibraryEntry) {
@@ -259,6 +264,9 @@ fun MuNoteApp(initialPdf: Uri?) {
     }
 
     LaunchedEffect(Unit) {
+        runCatching { backupManager.autoBackupIfDue() }
+            .onSuccess { backupRevision++ }
+
         handwritingModelState = if (handwritingRecognizer.isReady()) {
             HandwritingModelState.READY
         } else {
@@ -323,6 +331,9 @@ fun MuNoteApp(initialPdf: Uri?) {
         LibraryHome(
             library = library,
             entries = remember(libraryRevision) { library.entries() },
+            trashEntries = remember(libraryRevision) { library.trashEntries() },
+            folders = remember(libraryRevision) { library.folders() },
+            backups = remember(backupRevision) { backupManager.backups() },
             error = loadError,
             onImport = { picker.launch(arrayOf("application/pdf")) },
             onCreateNote = { title, template ->
@@ -353,6 +364,41 @@ fun MuNoteApp(initialPdf: Uri?) {
                         .onFailure { loadError = it.message ?: context.getString(R.string.error_delete) }
                 }
             },
+            onRestore = { entry ->
+                scope.launch {
+                    runCatching { library.restoreFromTrash(entry) }
+                        .onSuccess { libraryRevision++ }
+                        .onFailure { loadError = it.message }
+                }
+            },
+            onDeletePermanently = { entry ->
+                scope.launch {
+                    runCatching { library.deletePermanently(entry) }
+                        .onSuccess { libraryRevision++ }
+                        .onFailure { loadError = it.message ?: context.getString(R.string.error_delete) }
+                }
+            },
+            onToggleFavorite = { entry ->
+                scope.launch {
+                    runCatching { library.toggleFavorite(entry) }
+                        .onSuccess { libraryRevision++ }
+                        .onFailure { loadError = it.message }
+                }
+            },
+            onMoveToFolder = { entry, folderId ->
+                scope.launch {
+                    runCatching { library.moveToFolder(entry, folderId) }
+                        .onSuccess { libraryRevision++ }
+                        .onFailure { loadError = it.message }
+                }
+            },
+            onCreateFolder = { name ->
+                scope.launch {
+                    runCatching { library.createFolder(name) }
+                        .onSuccess { libraryRevision++ }
+                        .onFailure { loadError = it.message }
+                }
+            },
             onSetCover = { entry ->
                 coverTarget = entry
                 coverPicker.launch(arrayOf("image/*"))
@@ -362,6 +408,36 @@ fun MuNoteApp(initialPdf: Uri?) {
                     runCatching { library.clearCustomCover(entry) }
                         .onSuccess { libraryRevision++ }
                         .onFailure { loadError = it.message }
+                }
+            },
+            onBackupNow = {
+                scope.launch {
+                    runCatching { backupManager.createManualBackup() }
+                        .onSuccess {
+                            backupRevision++
+                            Toast.makeText(
+                                context,
+                                context.getString(R.string.toast_backup_created),
+                                Toast.LENGTH_SHORT
+                            ).show()
+                        }
+                        .onFailure { loadError = it.message }
+                }
+            },
+            onRestoreBackup = { backup ->
+                scope.launch {
+                    runCatching {
+                        backupManager.restore(backup.fileName)
+                        library.reload()
+                    }.onSuccess {
+                        libraryRevision++
+                        backupRevision++
+                        Toast.makeText(
+                            context,
+                            context.getString(R.string.toast_backup_restored),
+                            Toast.LENGTH_SHORT
+                        ).show()
+                    }.onFailure { loadError = it.message }
                 }
             },
         )
@@ -469,26 +545,55 @@ private fun LanguageMenu() {
     }
 }
 
+private enum class LibraryView { ALL, FAVORITES, TRASH }
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun LibraryHome(
     library: PdfLibrary,
     entries: List<LibraryEntry>,
+    trashEntries: List<LibraryEntry>,
+    folders: List<LibraryFolder>,
+    backups: List<LocalBackupInfo>,
     error: String?,
     onImport: () -> Unit,
     onCreateNote: (String, PageTemplate) -> Unit,
     onOpen: (LibraryEntry) -> Unit,
     onRename: (LibraryEntry, String) -> Unit,
     onDelete: (LibraryEntry) -> Unit,
+    onRestore: (LibraryEntry) -> Unit,
+    onDeletePermanently: (LibraryEntry) -> Unit,
+    onToggleFavorite: (LibraryEntry) -> Unit,
+    onMoveToFolder: (LibraryEntry, String?) -> Unit,
+    onCreateFolder: (String) -> Unit,
     onSetCover: (LibraryEntry) -> Unit,
     onResetCover: (LibraryEntry) -> Unit,
+    onBackupNow: () -> Unit,
+    onRestoreBackup: (LocalBackupInfo) -> Unit,
 ) {
     var renameTarget by remember { mutableStateOf<LibraryEntry?>(null) }
     var renameText by remember { mutableStateOf("") }
     var deleteTarget by remember { mutableStateOf<LibraryEntry?>(null) }
+    var permanentDeleteTarget by remember { mutableStateOf<LibraryEntry?>(null) }
+    var moveTarget by remember { mutableStateOf<LibraryEntry?>(null) }
     var showNewNotebook by remember { mutableStateOf(false) }
     var newNotebookTitle by remember { mutableStateOf("") }
     var newNotebookTemplate by remember { mutableStateOf(PageTemplate.BLANK) }
+    var showNewFolder by remember { mutableStateOf(false) }
+    var newFolderName by remember { mutableStateOf("") }
+    var showBackups by remember { mutableStateOf(false) }
+    var view by remember { mutableStateOf(LibraryView.ALL) }
+    var selectedFolderId by remember { mutableStateOf<String?>(null) }
+
+    val visibleEntries = when (view) {
+        LibraryView.TRASH -> trashEntries
+        LibraryView.FAVORITES -> entries.filter { it.favorite }
+        LibraryView.ALL -> if (selectedFolderId == null) {
+            entries
+        } else {
+            entries.filter { it.folderId == selectedFolderId }
+        }
+    }
 
     if (showNewNotebook) {
         AlertDialog(
@@ -551,6 +656,38 @@ private fun LibraryHome(
         )
     }
 
+    if (showNewFolder) {
+        AlertDialog(
+            onDismissRequest = { showNewFolder = false },
+            title = { Text(stringResource(R.string.dialog_new_folder_title)) },
+            text = {
+                OutlinedTextField(
+                    value = newFolderName,
+                    onValueChange = { newFolderName = it },
+                    singleLine = true,
+                    label = { Text(stringResource(R.string.label_folder_name)) }
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = newFolderName.trim().isNotEmpty(),
+                    onClick = {
+                        onCreateFolder(newFolderName)
+                        newFolderName = ""
+                        showNewFolder = false
+                    }
+                ) {
+                    Text(stringResource(R.string.action_create))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showNewFolder = false }) {
+                    Text(stringResource(R.string.action_cancel))
+                }
+            }
+        )
+    }
+
     renameTarget?.let { entry ->
         AlertDialog(
             onDismissRequest = { renameTarget = null },
@@ -585,8 +722,8 @@ private fun LibraryHome(
     deleteTarget?.let { entry ->
         AlertDialog(
             onDismissRequest = { deleteTarget = null },
-            title = { Text(stringResource(R.string.dialog_delete_title)) },
-            text = { Text(stringResource(R.string.dialog_delete_message)) },
+            title = { Text(stringResource(R.string.dialog_move_to_trash_title)) },
+            text = { Text(stringResource(R.string.dialog_move_to_trash_message)) },
             confirmButton = {
                 TextButton(
                     onClick = {
@@ -595,7 +732,7 @@ private fun LibraryHome(
                     }
                 ) {
                     Text(
-                        stringResource(R.string.action_delete),
+                        stringResource(R.string.action_move_to_trash),
                         color = MaterialTheme.colorScheme.error
                     )
                 }
@@ -603,6 +740,150 @@ private fun LibraryHome(
             dismissButton = {
                 TextButton(onClick = { deleteTarget = null }) {
                     Text(stringResource(R.string.action_cancel))
+                }
+            }
+        )
+    }
+
+    permanentDeleteTarget?.let { entry ->
+        AlertDialog(
+            onDismissRequest = { permanentDeleteTarget = null },
+            title = { Text(stringResource(R.string.dialog_delete_forever_title)) },
+            text = { Text(stringResource(R.string.dialog_delete_forever_message)) },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        onDeletePermanently(entry)
+                        permanentDeleteTarget = null
+                    }
+                ) {
+                    Text(
+                        stringResource(R.string.action_delete_forever),
+                        color = MaterialTheme.colorScheme.error
+                    )
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { permanentDeleteTarget = null }) {
+                    Text(stringResource(R.string.action_cancel))
+                }
+            }
+        )
+    }
+
+    moveTarget?.let { entry ->
+        AlertDialog(
+            onDismissRequest = { moveTarget = null },
+            title = { Text(stringResource(R.string.dialog_move_folder_title)) },
+            text = {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(300.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    TextButton(
+                        onClick = {
+                            onMoveToFolder(entry, null)
+                            moveTarget = null
+                        }
+                    ) {
+                        Text(stringResource(R.string.folder_root))
+                    }
+                    LazyColumn(Modifier.fillMaxWidth()) {
+                        items(count = folders.size, key = { folders[it].id }) { index ->
+                            val folder = folders[index]
+                            TextButton(
+                                onClick = {
+                                    onMoveToFolder(entry, folder.id)
+                                    moveTarget = null
+                                }
+                            ) {
+                                Text(folder.name)
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = {
+                TextButton(onClick = { moveTarget = null }) {
+                    Text(stringResource(R.string.action_cancel))
+                }
+            }
+        )
+    }
+
+    if (showBackups) {
+        AlertDialog(
+            onDismissRequest = { showBackups = false },
+            title = { Text(stringResource(R.string.local_backups_title)) },
+            text = {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(340.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(
+                        stringResource(R.string.local_backups_description),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    TextButton(onClick = onBackupNow) {
+                        Icon(Icons.Default.FileDownload, contentDescription = null)
+                        Spacer(Modifier.width(8.dp))
+                        Text(stringResource(R.string.action_backup_now))
+                    }
+                    if (backups.isEmpty()) {
+                        Text(
+                            stringResource(R.string.local_backups_empty),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    } else {
+                        LazyColumn(Modifier.fillMaxWidth()) {
+                            items(count = backups.size, key = { backups[it].fileName }) { index ->
+                                val backup = backups[index]
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(vertical = 4.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column(Modifier.weight(1f)) {
+                                        Text(
+                                            if (backup.automatic) {
+                                                stringResource(R.string.backup_auto)
+                                            } else {
+                                                stringResource(R.string.backup_manual)
+                                            },
+                                            style = MaterialTheme.typography.labelLarge
+                                        )
+                                        Text(
+                                            backup.fileName + " · " +
+                                                ((backup.sizeBytes + 1023L) / 1024L).toString() + " KB",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                    TextButton(
+                                        onClick = {
+                                            onRestoreBackup(backup)
+                                            showBackups = false
+                                        }
+                                    ) {
+                                        Text(stringResource(R.string.action_restore))
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = {
+                TextButton(onClick = { showBackups = false }) {
+                    Text(stringResource(R.string.action_close))
                 }
             }
         )
@@ -629,6 +910,12 @@ private fun LibraryHome(
                         style = MaterialTheme.typography.bodySmall
                     )
                 }
+                IconButton(onClick = { showBackups = true }) {
+                    Icon(
+                        Icons.Default.History,
+                        contentDescription = stringResource(R.string.local_backups_title)
+                    )
+                }
                 LanguageMenu()
                 Surface(
                     onClick = { showNewNotebook = true },
@@ -647,7 +934,7 @@ private fun LibraryHome(
                         )
                     }
                 }
-                                Surface(
+                Surface(
                     onClick = onImport,
                     shape = CircleShape,
                     color = MaterialTheme.colorScheme.primaryContainer
@@ -675,7 +962,74 @@ private fun LibraryHome(
             )
         }
 
-        if (entries.isEmpty()) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState())
+                .padding(horizontal = 20.dp, vertical = 10.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            AssistChip(
+                onClick = {
+                    view = LibraryView.ALL
+                    selectedFolderId = null
+                },
+                label = {
+                    Text(
+                        (if (view == LibraryView.ALL && selectedFolderId == null) "✓ " else "") +
+                            stringResource(R.string.library_all)
+                    )
+                }
+            )
+            AssistChip(
+                onClick = {
+                    view = LibraryView.FAVORITES
+                    selectedFolderId = null
+                },
+                label = {
+                    Text(
+                        (if (view == LibraryView.FAVORITES) "✓ " else "") +
+                            stringResource(R.string.library_favorites)
+                    )
+                },
+                leadingIcon = { Icon(Icons.Default.Star, contentDescription = null) }
+            )
+            folders.forEach { folder ->
+                AssistChip(
+                    onClick = {
+                        view = LibraryView.ALL
+                        selectedFolderId = folder.id
+                    },
+                    label = {
+                        Text(
+                            (if (view == LibraryView.ALL && selectedFolderId == folder.id) "✓ " else "") +
+                                folder.name
+                        )
+                    },
+                    leadingIcon = { Icon(Icons.Default.FolderOpen, contentDescription = null) }
+                )
+            }
+            AssistChip(
+                onClick = { showNewFolder = true },
+                label = { Text(stringResource(R.string.action_new_folder)) },
+                leadingIcon = { Icon(Icons.Default.Add, contentDescription = null) }
+            )
+            AssistChip(
+                onClick = {
+                    view = LibraryView.TRASH
+                    selectedFolderId = null
+                },
+                label = {
+                    Text(
+                        (if (view == LibraryView.TRASH) "✓ " else "") +
+                            stringResource(R.string.library_trash)
+                    )
+                },
+                leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null) }
+            )
+        }
+
+        if (visibleEntries.isEmpty()) {
             Box(
                 modifier = Modifier
                     .weight(1f)
@@ -692,39 +1046,58 @@ private fun LibraryHome(
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(12.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            FilledTonalIconButton(
-                                onClick = { showNewNotebook = true },
-                                modifier = Modifier.size(58.dp)
+                        if (view == LibraryView.ALL && selectedFolderId == null) {
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Icon(
-                                    Icons.Default.Add,
-                                    contentDescription = stringResource(R.string.action_new_notebook)
-                                )
+                                FilledTonalIconButton(
+                                    onClick = { showNewNotebook = true },
+                                    modifier = Modifier.size(58.dp)
+                                ) {
+                                    Icon(
+                                        Icons.Default.Add,
+                                        contentDescription = stringResource(R.string.action_new_notebook)
+                                    )
+                                }
+                                FilledTonalIconButton(
+                                    onClick = onImport,
+                                    modifier = Modifier.size(58.dp)
+                                ) {
+                                    Icon(
+                                        Icons.Default.FolderOpen,
+                                        contentDescription = stringResource(R.string.action_import_pdf)
+                                    )
+                                }
                             }
-                                                    FilledTonalIconButton(onClick = onImport, modifier = Modifier.size(58.dp)) {
-                            Icon(
-                                Icons.Default.FolderOpen,
-                                contentDescription = stringResource(R.string.action_import_pdf)
+                        }
+                        Text(
+                            if (view == LibraryView.TRASH) {
+                                stringResource(R.string.trash_empty)
+                            } else {
+                                stringResource(R.string.home_empty_title)
+                            }
+                        )
+                        if (view != LibraryView.TRASH) {
+                            Text(
+                                stringResource(R.string.home_empty_description),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                style = MaterialTheme.typography.bodySmall
                             )
                         }
-                        }
-                        Text(stringResource(R.string.home_empty_title))
-                        Text(
-                            stringResource(R.string.home_empty_description),
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            style = MaterialTheme.typography.bodySmall
-                        )
                     }
                 }
             }
         } else {
             Text(
-                stringResource(R.string.recent_documents),
-                modifier = Modifier.padding(start = 24.dp, top = 18.dp, bottom = 8.dp),
+                when {
+                    view == LibraryView.TRASH -> stringResource(R.string.library_trash)
+                    view == LibraryView.FAVORITES -> stringResource(R.string.library_favorites)
+                    selectedFolderId != null -> folders.firstOrNull { it.id == selectedFolderId }?.name
+                        ?: stringResource(R.string.recent_documents)
+                    else -> stringResource(R.string.recent_documents)
+                },
+                modifier = Modifier.padding(start = 24.dp, top = 8.dp, bottom = 8.dp),
                 style = MaterialTheme.typography.titleMedium
             )
             LazyVerticalGrid(
@@ -737,13 +1110,14 @@ private fun LibraryHome(
                 verticalArrangement = Arrangement.spacedBy(20.dp)
             ) {
                 items(
-                    count = entries.size,
-                    key = { entries[it].fingerprint }
+                    count = visibleEntries.size,
+                    key = { visibleEntries[it].fingerprint }
                 ) { index ->
-                    val entry = entries[index]
+                    val entry = visibleEntries[index]
                     LibraryDocumentCard(
                         library = library,
                         entry = entry,
+                        inTrash = view == LibraryView.TRASH,
                         onClick = { onOpen(entry) },
                         onRename = {
                             renameText = entry.title
@@ -751,7 +1125,11 @@ private fun LibraryHome(
                         },
                         onSetCover = { onSetCover(entry) },
                         onResetCover = { onResetCover(entry) },
+                        onToggleFavorite = { onToggleFavorite(entry) },
+                        onMove = { moveTarget = entry },
                         onDelete = { deleteTarget = entry },
+                        onRestore = { onRestore(entry) },
+                        onDeletePermanently = { permanentDeleteTarget = entry },
                     )
                 }
             }
@@ -764,11 +1142,16 @@ private fun LibraryHome(
 private fun LibraryDocumentCard(
     library: PdfLibrary,
     entry: LibraryEntry,
+    inTrash: Boolean,
     onClick: () -> Unit,
     onRename: () -> Unit,
     onSetCover: () -> Unit,
     onResetCover: () -> Unit,
+    onToggleFavorite: () -> Unit,
+    onMove: () -> Unit,
     onDelete: () -> Unit,
+    onRestore: () -> Unit,
+    onDeletePermanently: () -> Unit,
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
     val cover by produceState<Bitmap?>(
@@ -785,6 +1168,7 @@ private fun LibraryDocumentCard(
     ) {
         Surface(
             onClick = onClick,
+            enabled = !inTrash,
             modifier = Modifier
                 .fillMaxWidth()
                 .aspectRatio(0.72f),
@@ -808,8 +1192,22 @@ private fun LibraryDocumentCard(
                             .background(MaterialTheme.colorScheme.surfaceVariant),
                         contentAlignment = Alignment.Center
                     ) {
-                        Text("PDF", style = MaterialTheme.typography.titleLarge)
+                        Text(
+                            if (entry.kind == DocumentKind.NOTE) "NOTE" else "PDF",
+                            style = MaterialTheme.typography.titleLarge
+                        )
                     }
+                }
+
+                if (entry.favorite && !inTrash) {
+                    Icon(
+                        Icons.Default.Star,
+                        contentDescription = stringResource(R.string.library_favorites),
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier
+                            .align(Alignment.TopStart)
+                            .padding(10.dp)
+                    )
                 }
 
                 Box(
@@ -834,38 +1232,88 @@ private fun LibraryDocumentCard(
                         expanded = menuExpanded,
                         onDismissRequest = { menuExpanded = false }
                     ) {
-                        DropdownMenuItem(
-                            text = { Text(stringResource(R.string.action_rename)) },
-                            leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null) },
-                            onClick = {
-                                menuExpanded = false
-                                onRename()
-                            }
-                        )
-                        DropdownMenuItem(
-                            text = { Text(stringResource(R.string.action_set_cover)) },
-                            onClick = {
-                                menuExpanded = false
-                                onSetCover()
-                            }
-                        )
-                        if (entry.hasCustomCover) {
+                        if (inTrash) {
                             DropdownMenuItem(
-                                text = { Text(stringResource(R.string.action_reset_cover)) },
+                                text = { Text(stringResource(R.string.action_restore)) },
+                                leadingIcon = { Icon(Icons.Default.History, contentDescription = null) },
                                 onClick = {
                                     menuExpanded = false
-                                    onResetCover()
+                                    onRestore()
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.action_delete_forever)) },
+                                leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null) },
+                                onClick = {
+                                    menuExpanded = false
+                                    onDeletePermanently()
+                                }
+                            )
+                        } else {
+                            DropdownMenuItem(
+                                text = {
+                                    Text(
+                                        stringResource(
+                                            if (entry.favorite) {
+                                                R.string.action_unfavorite
+                                            } else {
+                                                R.string.action_favorite
+                                            }
+                                        )
+                                    )
+                                },
+                                leadingIcon = {
+                                    Icon(
+                                        if (entry.favorite) Icons.Default.Star else Icons.Default.StarBorder,
+                                        contentDescription = null
+                                    )
+                                },
+                                onClick = {
+                                    menuExpanded = false
+                                    onToggleFavorite()
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.action_move_folder)) },
+                                leadingIcon = { Icon(Icons.Default.FolderOpen, contentDescription = null) },
+                                onClick = {
+                                    menuExpanded = false
+                                    onMove()
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.action_rename)) },
+                                leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null) },
+                                onClick = {
+                                    menuExpanded = false
+                                    onRename()
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.action_set_cover)) },
+                                onClick = {
+                                    menuExpanded = false
+                                    onSetCover()
+                                }
+                            )
+                            if (entry.hasCustomCover) {
+                                DropdownMenuItem(
+                                    text = { Text(stringResource(R.string.action_reset_cover)) },
+                                    onClick = {
+                                        menuExpanded = false
+                                        onResetCover()
+                                    }
+                                )
+                            }
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.action_move_to_trash)) },
+                                leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null) },
+                                onClick = {
+                                    menuExpanded = false
+                                    onDelete()
                                 }
                             )
                         }
-                        DropdownMenuItem(
-                            text = { Text(stringResource(R.string.action_delete)) },
-                            leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null) },
-                            onClick = {
-                                menuExpanded = false
-                                onDelete()
-                            }
-                        )
                     }
                 }
             }
@@ -885,6 +1333,7 @@ private fun LibraryDocumentCard(
         )
         Text(
             when {
+                inTrash -> stringResource(R.string.library_trash)
                 entry.kind == DocumentKind.NOTE ->
                     stringResource(
                         R.string.native_notebook_pages,

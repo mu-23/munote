@@ -39,11 +39,22 @@ data class LibraryEntry(
     val kind: DocumentKind = DocumentKind.PDF,
     val pageTemplate: PageTemplate = PageTemplate.BLANK,
     val notePageCount: Int = 0,
+    val favorite: Boolean = false,
+    val folderId: String? = null,
+    val trashedAt: Long? = null,
+)
+
+@Serializable
+data class LibraryFolder(
+    val id: String,
+    val name: String,
+    val createdAt: Long,
 )
 
 @Serializable
 private data class LibraryIndex(
     val entries: List<LibraryEntry> = emptyList(),
+    val folders: List<LibraryFolder> = emptyList(),
 )
 
 /**
@@ -59,22 +70,39 @@ class PdfLibrary(private val context: Context) {
     private val coversDir = File(context.filesDir, "covers").apply { mkdirs() }
     private val indexFile = File(documentsDir, "library.json")
     private val entries = linkedMapOf<String, LibraryEntry>()
+    private val folders = linkedMapOf<String, LibraryFolder>()
 
     init {
-        if (indexFile.exists()) {
-            runCatching {
-                json.decodeFromString<LibraryIndex>(indexFile.readText()).entries.forEach { entry ->
-                    entries[entry.fingerprint] = entry
-                }
-            }
+        reload()
+    }
+
+    @Synchronized
+    fun reload() {
+        entries.clear()
+        folders.clear()
+        if (!indexFile.exists()) return
+        runCatching {
+            val index = json.decodeFromString<LibraryIndex>(indexFile.readText())
+            index.entries.forEach { entry -> entries[entry.fingerprint] = entry }
+            index.folders.forEach { folder -> folders[folder.id] = folder }
         }
     }
 
     @Synchronized
     fun entries(): List<LibraryEntry> =
         entries.values
-            .filter { documentFile(it.fingerprint).exists() }
-            .sortedByDescending { it.lastOpenedAt }
+            .filter { it.trashedAt == null && documentFile(it.fingerprint).exists() }
+            .sortedWith(compareByDescending<LibraryEntry> { it.favorite }.thenByDescending { it.lastOpenedAt })
+
+    @Synchronized
+    fun trashEntries(): List<LibraryEntry> =
+        entries.values
+            .filter { it.trashedAt != null && documentFile(it.fingerprint).exists() }
+            .sortedByDescending { it.trashedAt }
+
+    @Synchronized
+    fun folders(): List<LibraryFolder> =
+        folders.values.sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it.name })
 
     suspend fun displayName(uri: Uri): String = withContext(Dispatchers.IO) {
         val projection = arrayOf(OpenableColumns.DISPLAY_NAME)
@@ -108,6 +136,9 @@ class PdfLibrary(private val context: Context) {
                 kind = previous?.kind ?: DocumentKind.PDF,
                 pageTemplate = previous?.pageTemplate ?: PageTemplate.BLANK,
                 notePageCount = previous?.notePageCount ?: 0,
+                favorite = previous?.favorite ?: false,
+                folderId = previous?.folderId,
+                trashedAt = previous?.trashedAt,
             )
             synchronized(this@PdfLibrary) {
                 entries[fingerprint] = entry
@@ -166,6 +197,72 @@ class PdfLibrary(private val context: Context) {
                     lastOpenedAt = System.currentTimeMillis(),
                 )
             )
+        }
+
+
+    suspend fun createFolder(name: String): LibraryFolder = withContext(Dispatchers.IO) {
+        val normalized = name.trim()
+        require(normalized.isNotEmpty()) { "Folder name cannot be empty" }
+        val now = System.currentTimeMillis()
+        val folder = LibraryFolder(
+            id = "folder-" + UUID.randomUUID().toString().replace("-", ""),
+            name = normalized,
+            createdAt = now,
+        )
+        synchronized(this@PdfLibrary) {
+            folders[folder.id] = folder
+            persistLocked()
+        }
+        folder
+    }
+
+    suspend fun renameFolder(folder: LibraryFolder, name: String): LibraryFolder =
+        withContext(Dispatchers.IO) {
+            val normalized = name.trim()
+            require(normalized.isNotEmpty()) { "Folder name cannot be empty" }
+            val updated = folder.copy(name = normalized)
+            synchronized(this@PdfLibrary) {
+                folders[folder.id] = updated
+                persistLocked()
+            }
+            updated
+        }
+
+    suspend fun deleteFolder(folder: LibraryFolder) = withContext(Dispatchers.IO) {
+        synchronized(this@PdfLibrary) {
+            folders.remove(folder.id)
+            entries.replaceAll { _, entry ->
+                if (entry.folderId == folder.id) entry.copy(folderId = null) else entry
+            }
+            persistLocked()
+        }
+    }
+
+    suspend fun moveToFolder(entry: LibraryEntry, folderId: String?): LibraryEntry =
+        withContext(Dispatchers.IO) {
+            val normalized = folderId?.takeIf { id ->
+                synchronized(this@PdfLibrary) { folders.containsKey(id) }
+            }
+            val current = synchronized(this@PdfLibrary) {
+                entries[entry.fingerprint] ?: entry
+            }
+            update(current.copy(folderId = normalized))
+        }
+
+    suspend fun toggleFavorite(entry: LibraryEntry): LibraryEntry =
+        withContext(Dispatchers.IO) {
+            val current = synchronized(this@PdfLibrary) {
+                entries[entry.fingerprint] ?: entry
+            }
+            update(current.copy(favorite = !current.favorite))
+        }
+
+    suspend fun restoreFromTrash(entry: LibraryEntry): LibraryEntry =
+        withContext(Dispatchers.IO) {
+            val current = synchronized(this@PdfLibrary) {
+                entries[entry.fingerprint] ?: entry
+            }
+            update(current.copy(trashedAt = null, lastOpenedAt = System.currentTimeMillis()))
         }
 
     suspend fun touch(entry: LibraryEntry): LibraryEntry = withContext(Dispatchers.IO) {
@@ -244,7 +341,14 @@ class PdfLibrary(private val context: Context) {
         renderFirstPdfPage(documentFile(entry.fingerprint), width)
     }
 
-    suspend fun delete(entry: LibraryEntry) = withContext(Dispatchers.IO) {
+    suspend fun delete(entry: LibraryEntry): LibraryEntry = withContext(Dispatchers.IO) {
+        val current = synchronized(this@PdfLibrary) {
+            entries[entry.fingerprint] ?: entry
+        }
+        update(current.copy(trashedAt = System.currentTimeMillis()))
+    }
+
+    suspend fun deletePermanently(entry: LibraryEntry) = withContext(Dispatchers.IO) {
         synchronized(this@PdfLibrary) {
             entries.remove(entry.fingerprint)
             persistLocked()
@@ -257,8 +361,14 @@ class PdfLibrary(private val context: Context) {
             File(File(context.filesDir, "indexes"), "${entry.fingerprint}.json"),
             File(File(context.filesDir, "handwriting-indexes"), "${entry.fingerprint}.json"),
             File(File(context.filesDir, "text-notes"), "${entry.fingerprint}.json"),
+            File(File(context.filesDir, "images"), entry.fingerprint),
+            File(File(context.filesDir, "links"), "${entry.fingerprint}.json"),
+            File(File(context.filesDir, "outlines"), "${entry.fingerprint}.json"),
         ).forEach { file ->
-            runCatching { if (file.exists()) file.delete() }
+            runCatching {
+                if (file.isDirectory) file.deleteRecursively()
+                else if (file.exists()) file.delete()
+            }
         }
     }
 
@@ -412,7 +522,14 @@ class PdfLibrary(private val context: Context) {
 
     private fun persistLocked() {
         val tmp = File(indexFile.parentFile, indexFile.name + ".tmp")
-        tmp.writeText(json.encodeToString(LibraryIndex(entries.values.toList())))
+        tmp.writeText(
+            json.encodeToString(
+                LibraryIndex(
+                    entries = entries.values.toList(),
+                    folders = folders.values.toList(),
+                )
+            )
+        )
         if (indexFile.exists()) indexFile.delete()
         tmp.renameTo(indexFile)
     }

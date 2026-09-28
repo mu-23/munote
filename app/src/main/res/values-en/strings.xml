@@ -111,4 +111,33 @@
     <string name="language">Language</string>
     <string name="language_chinese">中文</string>
     <string name="language_english">English</string>
+
+    <string name="library_all">All</string>
+    <string name="library_favorites">Favorites</string>
+    <string name="library_trash">Trash</string>
+    <string name="trash_empty">Trash is empty</string>
+    <string name="action_new_folder">New folder</string>
+    <string name="dialog_new_folder_title">New folder</string>
+    <string name="label_folder_name">Folder name</string>
+    <string name="folder_root">Library root</string>
+    <string name="action_favorite">Add to favorites</string>
+    <string name="action_unfavorite">Remove from favorites</string>
+    <string name="action_move_folder">Move to folder</string>
+    <string name="dialog_move_folder_title">Move to folder</string>
+    <string name="action_move_to_trash">Move to trash</string>
+    <string name="dialog_move_to_trash_title">Move to trash?</string>
+    <string name="dialog_move_to_trash_message">The document stays in MuNote\'s trash and can be restored later.</string>
+    <string name="action_delete_forever">Delete forever</string>
+    <string name="dialog_delete_forever_title">Delete forever?</string>
+    <string name="dialog_delete_forever_message">This permanently deletes the document, ink, text, and indexes. It cannot be undone.</string>
+    <string name="action_restore">Restore</string>
+    <string name="local_backups_title">Local backups</string>
+    <string name="local_backups_description">Backups stay inside MuNote\'s private app directory. Nothing is uploaded to the cloud and no folder is created at the Android storage root. MuNote makes at most one automatic backup per day on launch and keeps the latest 7 automatic snapshots.</string>
+    <string name="local_backups_empty">No local backups yet</string>
+    <string name="action_backup_now">Back up now</string>
+    <string name="backup_auto">Automatic backup</string>
+    <string name="backup_manual">Manual backup</string>
+    <string name="toast_backup_created">Local backup created</string>
+    <string name="toast_backup_restored">Local backup restored</string>
+
 </resources>

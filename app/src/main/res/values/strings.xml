@@ -111,4 +111,33 @@
     <string name="language">语言</string>
     <string name="language_chinese">中文</string>
     <string name="language_english">English</string>
+
+    <string name="library_all">全部</string>
+    <string name="library_favorites">收藏</string>
+    <string name="library_trash">回收站</string>
+    <string name="trash_empty">回收站是空的</string>
+    <string name="action_new_folder">新建文件夹</string>
+    <string name="dialog_new_folder_title">新建文件夹</string>
+    <string name="label_folder_name">文件夹名称</string>
+    <string name="folder_root">根目录</string>
+    <string name="action_favorite">加入收藏</string>
+    <string name="action_unfavorite">取消收藏</string>
+    <string name="action_move_folder">移动到文件夹</string>
+    <string name="dialog_move_folder_title">移动到文件夹</string>
+    <string name="action_move_to_trash">移到回收站</string>
+    <string name="dialog_move_to_trash_title">移到回收站？</string>
+    <string name="dialog_move_to_trash_message">文档会保留在 MuNote 的回收站里，可以之后恢复。</string>
+    <string name="action_delete_forever">永久删除</string>
+    <string name="dialog_delete_forever_title">永久删除？</string>
+    <string name="dialog_delete_forever_message">这会永久删除文档及其笔迹、文本和索引，无法撤销。</string>
+    <string name="action_restore">恢复</string>
+    <string name="local_backups_title">本地备份</string>
+    <string name="local_backups_description">备份只保存在 MuNote 自己的应用目录中，不上传云端，也不会在 Android 根目录创建文件夹。应用启动时最多每天自动备份一次，并保留最近 7 份自动备份。</string>
+    <string name="local_backups_empty">还没有本地备份</string>
+    <string name="action_backup_now">立即创建备份</string>
+    <string name="backup_auto">自动备份</string>
+    <string name="backup_manual">手动备份</string>
+    <string name="toast_backup_created">本地备份已创建</string>
+    <string name="toast_backup_restored">本地备份已恢复</string>
+
 </resources>
