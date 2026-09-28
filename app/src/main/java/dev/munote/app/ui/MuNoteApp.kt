@@ -46,6 +46,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.ArrowForward
 import androidx.compose.material.icons.filled.Brush
@@ -134,7 +135,9 @@ import dev.munote.app.ocr.ChineseOcrEngine
 import dev.munote.app.ocr.OcrIndexStore
 import dev.munote.app.ocr.SearchHit
 import dev.munote.app.ocr.SearchSource
+import dev.munote.app.pdf.DocumentKind
 import dev.munote.app.pdf.LibraryEntry
+import dev.munote.app.pdf.PageTemplate
 import dev.munote.app.pdf.PdfExporter
 import dev.munote.app.pdf.PdfLibrary
 import dev.munote.app.pdf.PdfSession
@@ -273,6 +276,11 @@ fun MuNoteApp(initialPdf: Uri?) {
     }
 
     LaunchedEffect(session?.fingerprint) {
+        if (currentEntry?.kind == DocumentKind.NOTE) {
+            ocrRunning = false
+            ocrDone = 0
+            return@LaunchedEffect
+        }
         val pdf = session ?: return@LaunchedEffect
         val store = indexStore ?: return@LaunchedEffect
         val anchor = (currentEntry?.lastPage ?: 0)
@@ -317,6 +325,19 @@ fun MuNoteApp(initialPdf: Uri?) {
             entries = remember(libraryRevision) { library.entries() },
             error = loadError,
             onImport = { picker.launch(arrayOf("application/pdf")) },
+            onCreateNote = { title, template ->
+                scope.launch {
+                    loadError = null
+                    runCatching {
+                        val entry = library.createNotebook(title, template)
+                        val next = PdfSession.openStored(context, entry.fingerprint)
+                        attachSession(next, entry)
+                    }.onFailure {
+                        loadError = it.message ?: context.getString(R.string.error_notebook_save)
+                        libraryRevision++
+                    }
+                }
+            },
             onOpen = ::openStored,
             onRename = { entry, title ->
                 scope.launch {
@@ -346,7 +367,11 @@ fun MuNoteApp(initialPdf: Uri?) {
         )
     } else {
         ReaderScreen(
-            documentTitle = currentEntry?.title ?: context.getString(R.string.default_pdf_note),
+            documentTitle = currentEntry?.title ?: if (currentEntry?.kind == DocumentKind.NOTE) {
+                context.getString(R.string.default_notebook_title)
+            } else {
+                context.getString(R.string.default_pdf_note)
+            },
             initialPage = currentEntry?.lastPage ?: 0,
             session = session!!,
             indexStore = indexStore!!,
@@ -359,6 +384,26 @@ fun MuNoteApp(initialPdf: Uri?) {
             ocrRunning = ocrRunning,
             ocrRevision = ocrRevision,
             bookmarks = currentEntry?.bookmarks ?: emptySet(),
+            isNotebook = currentEntry?.kind == DocumentKind.NOTE,
+            onAddPage = {
+                currentEntry?.takeIf { it.kind == DocumentKind.NOTE }?.let { entry ->
+                    scope.launch {
+                        loadError = null
+                        runCatching {
+                            session?.close()
+                            session = null
+                            val appended = library.appendNotebookPage(entry)
+                            val lastPage = appended.notePageCount.coerceAtLeast(1) - 1
+                            val updated = library.updateLastPage(appended, lastPage)
+                            val next = PdfSession.openStored(context, updated.fingerprint)
+                            attachSession(next, updated)
+                        }.onFailure {
+                            loadError = it.message ?: context.getString(R.string.error_notebook_save)
+                            libraryRevision++
+                        }
+                    }
+                }
+            },
             onToggleBookmark = { page ->
                 currentEntry?.let { entry ->
                     scope.launch {
