@@ -23,6 +23,15 @@ PDF import
 
 The original PDF is never destructively rewritten by the editor.
 
+Native notebook flow
+-> generate a lightweight local background PDF under the same document store
+-> assign a stable UUID-backed document identity independent of PDF bytes
+-> choose Blank / Ruled / Grid / Dot template at creation
+-> append pages by regenerating only the lightweight template background PDF
+-> keep ink/text/search sidecars keyed to the stable document identity
+
+Native notebooks skip scanned-PDF OCR because their background is generated locally and contains no source text.
+
 ## PDF OCR flow
 
 PDF page
@@ -97,7 +106,7 @@ Finger navigation remains separate.
 
 Typed notes are stored independently under `text-notes/<fingerprint>.json`.
 
-Each box keeps normalized page position, width/height, font size and text. Text mode taps create a box, the Android software keyboard edits it inline, and the same text participates in unified search. Export flattens the current text boxes onto the output PDF alongside vector ink.
+Each box keeps normalized page position, width/height, font size and text. Text mode taps create a box, the Android software keyboard edits it inline, and the same text participates in unified search. Active boxes can be moved, resized, deleted, and have their font size adjusted. Export flattens the current text boxes onto the output PDF alongside vector ink.
 
 ## Library covers
 
@@ -138,6 +147,8 @@ A future exporter can preserve/searchable OCR text as an actual PDF text layer i
   - last-page resume
   - bookmarks
   - first-page/custom cover rendering
+  - native notebook creation + template background generation
+  - stable UUID-backed notebook IDs + append-page regeneration
   - rename/delete
 
 - `pdf/PdfExporter.kt`
@@ -181,7 +192,7 @@ A future exporter can preserve/searchable OCR text as an actual PDF text layer i
   - Pen/Touch input modes
   - two-finger zoom/pan
   - three-finger page overview
-  - previous-location navigation
+  - multi-step jump-history navigation
   - library cover grid
   - inline typed text boxes
   - pen presets
@@ -203,13 +214,16 @@ Test the same Chinese handwriting sample in MuNote and Notein, then tune:
 - Xiaomi/Redmi stylus buttons if needed.
 
 ### P2 — notebook-native documents
-MuNote is currently strongest as a PDF notebook. The next structural feature should add native blank notebooks and page templates without faking them as imported PDFs.
+Core native notebook support is now implemented:
+- Blank / Ruled / Grid / Dot templates;
+- stable UUID-backed document ID independent of source bytes;
+- append-page flow without invalidating ink/text sidecars;
+- same handwriting, typed-text, search, cover, and export stack as imported PDFs.
 
-Desired capabilities:
-- blank/grid/dot/ruled pages;
-- add/delete/reorder pages;
-- stable document ID independent of a source PDF;
-- keep the same ink/search/export stack.
+Remaining page-management work:
+- delete pages;
+- reorder pages;
+- optional per-page template changes.
 
 ### P3 — export/search quality
 - preserve original PDF vector/text quality when exporting;
