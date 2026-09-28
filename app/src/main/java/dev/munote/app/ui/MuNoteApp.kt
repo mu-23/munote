@@ -44,6 +44,7 @@ import androidx.compose.material.icons.filled.Brush
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.FileDownload
+import androidx.compose.material.icons.filled.Gesture
 import androidx.compose.material.icons.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.List
@@ -701,7 +702,7 @@ private fun ReaderScreen(
             }
         }
 
-        if (showPenOptions && tool != InkTool.ERASER) {
+        if (showPenOptions && (tool == InkTool.PEN || tool == InkTool.HIGHLIGHTER)) {
             PenOptionsBar(
                 tool = tool,
                 penColor = penColor,
@@ -760,6 +761,16 @@ private fun ReaderScreen(
                     icon = { Icon(Icons.Default.Clear, contentDescription = null) },
                     onClick = {
                         tool = InkTool.ERASER
+                        showPenOptions = false
+                    }
+                )
+                Spacer(Modifier.width(8.dp))
+                ToolButton(
+                    selected = tool == InkTool.LASSO,
+                    label = "套索",
+                    icon = { Icon(Icons.Default.Gesture, contentDescription = null) },
+                    onClick = {
+                        tool = InkTool.LASSO
                         showPenOptions = false
                     }
                 )
