@@ -42,6 +42,7 @@ import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.ArrowForward
 import androidx.compose.material.icons.filled.Brush
 import androidx.compose.material.icons.filled.Clear
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.FolderOpen
@@ -111,6 +112,7 @@ import dev.munote.app.pdf.LibraryEntry
 import dev.munote.app.pdf.PdfExporter
 import dev.munote.app.pdf.PdfLibrary
 import dev.munote.app.pdf.PdfSession
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -606,21 +608,32 @@ private fun ReaderScreen(
     var pageJumpText by remember { mutableStateOf("") }
     var showPenOptions by remember { mutableStateOf(false) }
     var exportRunning by remember { mutableStateOf(false) }
+    var exportCompleted by remember { mutableIntStateOf(0) }
+    var exportTotal by remember { mutableIntStateOf(0) }
+    var exportJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
 
     val exportLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("application/pdf")
     ) { uri ->
         if (uri != null) {
-            scope.launch {
+            exportJob = scope.launch {
                 exportRunning = true
+                exportCompleted = 0
+                exportTotal = session.pageCount
                 try {
                     PdfExporter.exportFlattened(
                         context = context,
                         session = session,
                         inkStore = inkStore,
                         destination = uri,
+                        onProgress = { completed, total ->
+                            exportCompleted = completed
+                            exportTotal = total
+                        },
                     )
                     Toast.makeText(context, "已导出带批注 PDF", Toast.LENGTH_SHORT).show()
+                } catch (_: CancellationException) {
+                    Toast.makeText(context, "已取消导出", Toast.LENGTH_SHORT).show()
                 } catch (error: Throwable) {
                     Toast.makeText(
                         context,
@@ -629,6 +642,7 @@ private fun ReaderScreen(
                     ).show()
                 } finally {
                     exportRunning = false
+                    exportJob = null
                 }
             }
         }
@@ -737,17 +751,28 @@ private fun ReaderScreen(
                     IconButton(onClick = onOpenPdf) {
                         Icon(Icons.Default.FolderOpen, contentDescription = "导入另一个 PDF")
                     }
-                    IconButton(
-                        enabled = !exportRunning,
-                        onClick = {
-                            exportLauncher.launch(
-                                documentTitle.take(80).ifBlank { "MuNote" } + "-批注.pdf"
+                    if (exportRunning) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(2.dp)
+                        ) {
+                            CircularProgressIndicator(Modifier.size(17.dp), strokeWidth = 2.dp)
+                            Text(
+                                "${exportCompleted}/${exportTotal.coerceAtLeast(1)}",
+                                style = MaterialTheme.typography.labelSmall
                             )
+                            IconButton(onClick = { exportJob?.cancel() }) {
+                                Icon(Icons.Default.Close, contentDescription = "取消导出")
+                            }
                         }
-                    ) {
-                        if (exportRunning) {
-                            CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
-                        } else {
+                    } else {
+                        IconButton(
+                            onClick = {
+                                exportLauncher.launch(
+                                    documentTitle.take(80).ifBlank { "MuNote" } + "-批注.pdf"
+                                )
+                            }
+                        ) {
                             Icon(Icons.Default.FileDownload, contentDescription = "导出带批注 PDF")
                         }
                     }

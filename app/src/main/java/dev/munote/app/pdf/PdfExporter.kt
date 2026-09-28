@@ -10,6 +10,8 @@ import dev.munote.app.ink.InkPoint
 import dev.munote.app.ink.InkStore
 import dev.munote.app.ink.InkStroke
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import kotlin.math.hypot
 import kotlin.math.pow
@@ -28,10 +30,12 @@ object PdfExporter {
         inkStore: InkStore,
         destination: Uri,
         targetWidthPx: Int = 1600,
+        onProgress: (completedPages: Int, totalPages: Int) -> Unit = { _, _ -> },
     ): Int = withContext(Dispatchers.IO) {
         val document = PdfDocument()
         try {
             for (pageIndex in 0 until session.pageCount) {
+                currentCoroutineContext().ensureActive()
                 val bitmap = session.renderPage(pageIndex, targetWidthPx)
                 val pageInfo = PdfDocument.PageInfo.Builder(
                     bitmap.width,
@@ -50,8 +54,12 @@ object PdfExporter {
                 } finally {
                     document.finishPage(page)
                 }
+                withContext(Dispatchers.Main.immediate) {
+                    onProgress(pageIndex + 1, session.pageCount)
+                }
             }
 
+            currentCoroutineContext().ensureActive()
             context.contentResolver.openOutputStream(destination, "w").use { output ->
                 requireNotNull(output) { "无法创建导出文件" }
                 document.writeTo(output)
