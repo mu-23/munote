@@ -251,10 +251,25 @@ fun MuNoteApp(initialPdf: Uri?) {
             error = loadError,
             onImport = { picker.launch(arrayOf("application/pdf")) },
             onOpen = ::openStored,
+            onRename = { entry, title ->
+                scope.launch {
+                    runCatching { library.rename(entry, title) }
+                        .onSuccess { libraryRevision++ }
+                        .onFailure { loadError = it.message ?: "重命名失败" }
+                }
+            },
+            onDelete = { entry ->
+                scope.launch {
+                    runCatching { library.delete(entry) }
+                        .onSuccess { libraryRevision++ }
+                        .onFailure { loadError = it.message ?: "删除失败" }
+                }
+            },
         )
     } else {
         ReaderScreen(
             documentTitle = currentEntry?.title ?: "PDF 笔记",
+            initialPage = currentEntry?.lastPage ?: 0,
             session = session!!,
             indexStore = indexStore!!,
             handwritingIndexStore = handwritingIndexStore!!,
@@ -264,6 +279,13 @@ fun MuNoteApp(initialPdf: Uri?) {
             ocrDone = ocrDone,
             ocrRunning = ocrRunning,
             ocrRevision = ocrRevision,
+            onPageChanged = { page ->
+                currentEntry?.let { entry ->
+                    scope.launch {
+                        currentEntry = library.updateLastPage(entry, page)
+                    }
+                }
+            },
             onClose = ::closeDocument,
             onOpenPdf = { picker.launch(arrayOf("application/pdf")) }
         )
