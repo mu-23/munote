@@ -12,6 +12,8 @@
     <string name="error_input_open">Could not open PDF</string>
     <string name="error_local_pdf_missing">The local PDF no longer exists</string>
     <string name="error_handwriting_model_missing">Simplified Chinese digital ink model is unavailable</string>
+    <string name="error_cover_open">Could not read cover image</string>
+    <string name="error_cover_save">Could not save cover</string>
 
     <string name="dialog_rename_title">Rename</string>
     <string name="label_document_name">Document name</string>
@@ -20,6 +22,8 @@
     <string name="action_delete">Delete</string>
     <string name="action_rename">Rename</string>
     <string name="action_import_pdf">Import PDF</string>
+    <string name="action_set_cover">Custom cover</string>
+    <string name="action_reset_cover">Use first page as cover</string>
     <string name="dialog_delete_title">Delete this document?</string>
     <string name="dialog_delete_message">This removes the local MuNote PDF copy, handwriting, and recognition indexes. The original PDF in your file manager is not affected.</string>
 
