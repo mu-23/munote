@@ -24,7 +24,7 @@ import kotlin.math.pow
 object PdfExporter {
     suspend fun exportFlattened(
         context: Context,
-        session: PdfSession,
+        session: DocumentSession,
         inkStore: InkStore,
         destination: Uri,
         targetWidthPx: Int = 1600,
