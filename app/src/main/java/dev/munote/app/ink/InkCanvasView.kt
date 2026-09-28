@@ -46,6 +46,9 @@ class InkCanvasView(context: Context) : View(context) {
     var highlighterWidthDp: Float = 12f
     var fingerWritingEnabled: Boolean = false
     var shape: InkShape = InkShape.LINE
+    var brush: InkBrush = InkBrush.FOUNTAIN
+    var eraserMode: EraserMode = EraserMode.STROKE
+    var eraserSizeDp: Float = 18f
 
     var onStrokeCommitted: ((InkStroke) -> Unit)? = null
     var onPageMutated: ((List<InkStroke>) -> Unit)? = null
@@ -286,6 +289,7 @@ class InkCanvasView(context: Context) : View(context) {
                                     } else {
                                         shape
                                     },
+                                    brush = brush,
                                 )
                                 committed.add(stroke)
                                 onStrokeCommitted?.invoke(stroke)
@@ -299,6 +303,7 @@ class InkCanvasView(context: Context) : View(context) {
                                     colorArgb = inkColor,
                                     baseWidthDp = currentBaseWidth(),
                                     highlighter = gestureTool == InkTool.HIGHLIGHTER,
+                                    brush = brush,
                                 )
                                 committed.add(stroke)
                                 onStrokeCommitted?.invoke(stroke)
@@ -482,21 +487,65 @@ class InkCanvasView(context: Context) : View(context) {
         if (width <= 0 || height <= 0) return
         val nx = x / width
         val ny = y / height
-        val radiusPx = 18f * density
+        val radiusPx = eraserSizeDp.coerceIn(6f, 64f) * density
         val rx = radiusPx / width
         val ry = radiusPx / height
-        val before = committed.size
-        committed.removeAll { stroke ->
-            val probes = if (stroke.shape == null) stroke.points else shapeProbePoints(stroke)
-            probes.any { point ->
-                val dx = (point.x - nx) / rx
-                val dy = (point.y - ny) / ry
-                dx * dx + dy * dy <= 1f
-            }
+
+        fun touched(point: InkPoint): Boolean {
+            val dx = (point.x - nx) / rx
+            val dy = (point.y - ny) / ry
+            return dx * dx + dy * dy <= 1f
         }
-        if (before != committed.size) {
-            eraserDirty = true
-            clearSelection()
+
+        when (eraserMode) {
+            EraserMode.STROKE -> {
+                val before = committed.size
+                committed.removeAll { stroke ->
+                    val probes = if (stroke.shape == null) stroke.points else shapeProbePoints(stroke)
+                    probes.any(::touched)
+                }
+                if (before != committed.size) {
+                    eraserDirty = true
+                    clearSelection()
+                }
+            }
+
+            EraserMode.PIXEL -> {
+                val next = mutableListOf<InkStroke>()
+                var changed = false
+                committed.forEach { stroke ->
+                    if (stroke.shape != null) {
+                        val hit = shapeProbePoints(stroke).any(::touched)
+                        if (hit) changed = true else next += stroke
+                        return@forEach
+                    }
+
+                    var chunk = mutableListOf<InkPoint>()
+                    fun flushChunk() {
+                        if (chunk.isNotEmpty()) {
+                            next += stroke.copy(points = chunk.toList())
+                            chunk = mutableListOf()
+                        }
+                    }
+
+                    stroke.points.forEach { point ->
+                        if (touched(point)) {
+                            changed = true
+                            flushChunk()
+                        } else {
+                            chunk += point
+                        }
+                    }
+                    flushChunk()
+                }
+
+                if (changed) {
+                    committed.clear()
+                    committed.addAll(next)
+                    eraserDirty = true
+                    clearSelection()
+                }
+            }
         }
     }
 
@@ -791,6 +840,7 @@ class InkCanvasView(context: Context) : View(context) {
                         InkTool.SHAPE -> shape
                         else -> null
                     },
+                    brush = brush,
                 )
             )
         }
@@ -825,7 +875,11 @@ class InkCanvasView(context: Context) : View(context) {
         if (pts.isEmpty()) return
 
         paint.color = stroke.colorArgb
-        paint.alpha = if (stroke.highlighter) 82 else 255
+        paint.alpha = when {
+            stroke.highlighter -> 82
+            stroke.brush == InkBrush.PENCIL -> 175
+            else -> 255
+        }
         paint.strokeCap = Paint.Cap.ROUND
         paint.strokeJoin = Paint.Join.ROUND
         paint.style = Paint.Style.STROKE
@@ -964,10 +1018,23 @@ class InkCanvasView(context: Context) : View(context) {
         if (stroke.highlighter) return stroke.baseWidthDp * density
 
         val pressure = ((a.pressure + b.pressure) * 0.5f).coerceIn(0.03f, 1f)
-        val pressureCurve = pressure.toDouble().pow(0.58).toFloat()
-        val velocityThin = (speedPxMs / (3.0f * density)).coerceIn(0f, 0.24f)
-        val factor = (0.48f + 0.90f * pressureCurve) * (1f - velocityThin)
-        return (stroke.baseWidthDp * density * factor)
-            .coerceIn(0.72f * density, 4.2f * density)
+        return when (stroke.brush) {
+            InkBrush.BALLPOINT ->
+                (stroke.baseWidthDp * density).coerceAtLeast(0.65f * density)
+
+            InkBrush.PENCIL -> {
+                val factor = 0.58f + pressure * 0.34f
+                (stroke.baseWidthDp * density * factor)
+                    .coerceIn(0.55f * density, 3.6f * density)
+            }
+
+            InkBrush.FOUNTAIN -> {
+                val pressureCurve = pressure.toDouble().pow(0.58).toFloat()
+                val velocityThin = (speedPxMs / (3.0f * density)).coerceIn(0f, 0.24f)
+                val factor = (0.48f + 0.90f * pressureCurve) * (1f - velocityThin)
+                (stroke.baseWidthDp * density * factor)
+                    .coerceIn(0.72f * density, 4.2f * density)
+            }
+        }
     }
 }
