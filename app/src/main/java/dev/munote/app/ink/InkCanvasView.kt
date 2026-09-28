@@ -55,6 +55,7 @@ class InkCanvasView(context: Context) : View(context) {
 
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
+                requestUnbufferedDispatch(event)
                 parent?.requestDisallowInterceptTouchEvent(true)
                 drawing = true
                 active.clear()
@@ -79,8 +80,9 @@ class InkCanvasView(context: Context) : View(context) {
                 invalidate()
                 return true
             }
-            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                if (drawing && tool != InkTool.ERASER && active.isNotEmpty()) {
+            MotionEvent.ACTION_UP -> {
+                val canceled = event.flags and MotionEvent.FLAG_CANCELED != 0
+                if (!canceled && drawing && tool != InkTool.ERASER && active.isNotEmpty()) {
                     val stroke = InkStroke(
                         points = active.toList(),
                         colorArgb = inkColor,
@@ -90,6 +92,15 @@ class InkCanvasView(context: Context) : View(context) {
                     committed.add(stroke)
                     onStrokeCommitted?.invoke(stroke)
                 }
+                active.clear()
+                drawing = false
+                parent?.requestDisallowInterceptTouchEvent(false)
+                invalidate()
+                return true
+            }
+            MotionEvent.ACTION_CANCEL -> {
+                // Android uses CANCEL for palm rejection/navigation conflicts.
+                // Never persist a stroke the system has marked accidental.
                 active.clear()
                 drawing = false
                 parent?.requestDisallowInterceptTouchEvent(false)
