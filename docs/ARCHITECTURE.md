@@ -49,10 +49,12 @@ Stylus MotionEvent
 -> normalized page coordinates
 -> persist under `ink/<fingerprint>.json`
 
-Finger input is handled separately for:
-- page swipe at fit-to-page scale;
-- pinch zoom;
-- panning while zoomed.
+Input mode is explicit:
+- Pen mode: stylus writes; fingers navigate.
+- Touch mode: one finger writes; two fingers pan/zoom.
+- Three-finger inward pinch opens the page overview.
+
+Single-finger navigation is disabled while the text tool is active so page taps can create text boxes.
 
 Undo/redo is page-snapshot based so pen strokes, erasing and lasso moves share one history model.
 
@@ -70,7 +72,8 @@ Recognition is debounced after writing pauses so it does not run in the latency-
 
 Search combines:
 - scanned-PDF OCR hits;
-- recognized handwriting hits.
+- recognized handwriting hits;
+- typed text-box hits.
 
 The UI labels the source of each hit and uses different highlight colors for PDF text vs handwritten content.
 
@@ -90,12 +93,27 @@ Stylus lasso
 
 Finger navigation remains separate.
 
+## Typed text boxes
+
+Typed notes are stored independently under `text-notes/<fingerprint>.json`.
+
+Each box keeps normalized page position, width/height, font size and text. Text mode taps create a box, the Android software keyboard edits it inline, and the same text participates in unified search. Export flattens the current text boxes onto the output PDF alongside vector ink.
+
+## Library covers
+
+The library uses a responsive cover grid instead of list rows.
+
+- Default cover: locally rendered first PDF page.
+- Optional custom cover: selected image copied into app-private `covers/`.
+- Filenames sit below the cover and marquee when they overflow.
+
 ## PDF export
 
 `PdfExporter` currently creates a flattened compatibility PDF:
 
 original page rendered locally
 -> draw stored vector ink over the page
+-> draw stored typed text boxes
 -> write through Android `PdfDocument`
 -> page-by-page progress callback with coroutine cancellation checks
 -> user chooses the destination with the system document picker
@@ -119,6 +137,7 @@ A future exporter can preserve/searchable OCR text as an actual PDF text layer i
   - last-open time
   - last-page resume
   - bookmarks
+  - first-page/custom cover rendering
   - rename/delete
 
 - `pdf/PdfExporter.kt`
@@ -142,6 +161,10 @@ A future exporter can preserve/searchable OCR text as an actual PDF text layer i
   - page-level persistent ink
   - undo/redo history
 
+- `text/TextStore.kt`
+  - persistent typed text boxes
+  - typed-text search index surface
+
 - `ink/InkCanvasView.kt`
   - low-latency stylus input
   - pressure/speed response
@@ -155,7 +178,12 @@ A future exporter can preserve/searchable OCR text as an actual PDF text layer i
   - PDF pager + handwriting overlay
   - thumbnails/bookmarks + bookmark-only filtering
   - direct page-number jump
-  - finger zoom/pan
+  - Pen/Touch input modes
+  - two-finger zoom/pan
+  - three-finger page overview
+  - previous-location navigation
+  - library cover grid
+  - inline typed text boxes
   - pen presets
   - export action
 
