@@ -3,6 +3,7 @@ package dev.munote.app.pdf
 import android.content.Context
 import android.net.Uri
 import android.provider.OpenableColumns
+import dev.munote.app.R
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
@@ -66,7 +67,7 @@ class PdfLibrary(private val context: Context) {
         fromProvider
             ?.takeIf { it.isNotBlank() }
             ?.removeSuffix(".pdf")
-            ?: "PDF 笔记"
+            ?: context.getString(R.string.default_pdf_note)
     }
 
     suspend fun registerImported(fingerprint: String, title: String): LibraryEntry =
@@ -75,7 +76,7 @@ class PdfLibrary(private val context: Context) {
             val previous = synchronized(this@PdfLibrary) { entries[fingerprint] }
             val entry = LibraryEntry(
                 fingerprint = fingerprint,
-                title = title.ifBlank { previous?.title ?: "PDF 笔记" },
+                title = title.ifBlank { previous?.title ?: context.getString(R.string.default_pdf_note) },
                 importedAt = previous?.importedAt ?: now,
                 lastOpenedAt = now,
                 lastPage = previous?.lastPage ?: 0,
@@ -103,7 +104,7 @@ class PdfLibrary(private val context: Context) {
 
     suspend fun rename(entry: LibraryEntry, newTitle: String): LibraryEntry =
         withContext(Dispatchers.IO) {
-            val title = newTitle.trim().ifBlank { "PDF 笔记" }
+            val title = newTitle.trim().ifBlank { context.getString(R.string.default_pdf_note) }
             val current = synchronized(this@PdfLibrary) {
                 entries[entry.fingerprint] ?: entry
             }
