@@ -2057,6 +2057,9 @@ private fun PdfInkPage(
                     var threeFingerGesture = false
                     var overviewTriggered = false
                     var threeFingerZoom = 1f
+                    var twoFingerZoom = 1f
+                    var twoFingerPanX = 0f
+                    var twoFingerPanY = 0f
                     var dragX = 0f
                     var dragY = 0f
                     var pressed = true
@@ -2085,6 +2088,16 @@ private fun PdfInkPage(
                                 pinched = true
                                 val zoomChange = event.calculateZoom()
                                 val panChange = event.calculatePan()
+
+                                if (zoomChange.isFinite() && zoomChange > 0f) {
+                                    twoFingerZoom *= zoomChange
+                                }
+                                twoFingerPanX += panChange.x
+                                twoFingerPanY += panChange.y
+
+                                // When the page is already enlarged, two fingers pan it normally.
+                                // At fit-to-page scale we still collect the drag so a horizontal
+                                // two-finger swipe can turn pages in Touch mode.
                                 applyTransform(zoomChange, panChange)
                                 event.changes.forEach { it.consume() }
                             }
@@ -2104,17 +2117,32 @@ private fun PdfInkPage(
                         }
                     }
 
+                    val thresholdPx = with(density) { 72.dp.toPx() }
+
                     if (
                         !fingerWritingEnabled &&
                         tool != InkTool.TEXT &&
                         !pinched &&
                         !threeFingerGesture &&
-                        scale <= 1.01f
+                        scale <= 1.01f &&
+                        abs(dragX) >= thresholdPx &&
+                        abs(dragX) > abs(dragY) * 1.15f
                     ) {
-                        val thresholdPx = with(density) { 72.dp.toPx() }
-                        if (abs(dragX) >= thresholdPx && abs(dragX) > abs(dragY) * 1.15f) {
-                            onPageSwipe(if (dragX < 0f) 1 else -1)
-                        }
+                        onPageSwipe(if (dragX < 0f) 1 else -1)
+                    }
+
+                    // Touch mode reserves one finger for writing, so page turning needs a
+                    // two-finger gesture. Only treat it as a page swipe when there was little
+                    // actual pinch zoom; otherwise the user's intent was zooming.
+                    if (
+                        pinched &&
+                        !threeFingerGesture &&
+                        scale <= 1.01f &&
+                        twoFingerZoom in 0.88f..1.12f &&
+                        abs(twoFingerPanX) >= thresholdPx &&
+                        abs(twoFingerPanX) > abs(twoFingerPanY) * 1.15f
+                    ) {
+                        onPageSwipe(if (twoFingerPanX < 0f) 1 else -1)
                     }
 
                 if (scale <= 1.01f) {
