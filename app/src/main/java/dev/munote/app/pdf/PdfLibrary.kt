@@ -16,6 +16,7 @@ data class LibraryEntry(
     val title: String,
     val importedAt: Long,
     val lastOpenedAt: Long,
+    val lastPage: Int = 0,
 )
 
 @Serializable
@@ -24,10 +25,11 @@ private data class LibraryIndex(
 )
 
 /**
- * Tiny local-first document library.
+ * Local-first document library.
  *
- * Imported PDFs already live under files/documents/<sha256>.pdf. This index only keeps user-facing
- * metadata so the app can reopen them without asking the system file picker every time.
+ * Imported PDFs live under files/documents/<sha256>.pdf. The library index keeps user-facing
+ * metadata, resume position, and enough information to manage the document without asking the
+ * system file picker again.
  */
 class PdfLibrary(private val context: Context) {
     private val json = Json { ignoreUnknownKeys = true; prettyPrint = false }
@@ -75,6 +77,7 @@ class PdfLibrary(private val context: Context) {
                 title = title.ifBlank { previous?.title ?: "PDF 笔记" },
                 importedAt = previous?.importedAt ?: now,
                 lastOpenedAt = now,
+                lastPage = previous?.lastPage ?: 0,
             )
             synchronized(this@PdfLibrary) {
                 entries[fingerprint] = entry
@@ -84,16 +87,54 @@ class PdfLibrary(private val context: Context) {
         }
 
     suspend fun touch(entry: LibraryEntry): LibraryEntry = withContext(Dispatchers.IO) {
-        val updated = entry.copy(lastOpenedAt = System.currentTimeMillis())
+        update(entry.copy(lastOpenedAt = System.currentTimeMillis()))
+    }
+
+    suspend fun updateLastPage(entry: LibraryEntry, pageIndex: Int): LibraryEntry =
+        withContext(Dispatchers.IO) {
+            val current = synchronized(this@PdfLibrary) {
+                entries[entry.fingerprint] ?: entry
+            }
+            if (current.lastPage == pageIndex) return@withContext current
+            update(current.copy(lastPage = pageIndex.coerceAtLeast(0)))
+        }
+
+    suspend fun rename(entry: LibraryEntry, newTitle: String): LibraryEntry =
+        withContext(Dispatchers.IO) {
+            val title = newTitle.trim().ifBlank { "PDF 笔记" }
+            val current = synchronized(this@PdfLibrary) {
+                entries[entry.fingerprint] ?: entry
+            }
+            update(current.copy(title = title))
+        }
+
+    suspend fun delete(entry: LibraryEntry) = withContext(Dispatchers.IO) {
         synchronized(this@PdfLibrary) {
-            entries[entry.fingerprint] = updated
+            entries.remove(entry.fingerprint)
             persistLocked()
         }
-        updated
+
+        // Document-related files are all keyed by the SHA-256 fingerprint, so deletion is scoped to
+        // this one library item. Failures are best-effort and do not leave a ghost entry in the UI.
+        listOf(
+            documentFile(entry.fingerprint),
+            File(File(context.filesDir, "ink"), "${entry.fingerprint}.json"),
+            File(File(context.filesDir, "indexes"), "${entry.fingerprint}.json"),
+            File(File(context.filesDir, "handwriting-indexes"), "${entry.fingerprint}.json"),
+        ).forEach { file ->
+            runCatching { if (file.exists()) file.delete() }
+        }
     }
 
     fun documentFile(fingerprint: String): File =
         File(documentsDir, "${fingerprint}.pdf")
+
+    @Synchronized
+    private fun update(entry: LibraryEntry): LibraryEntry {
+        entries[entry.fingerprint] = entry
+        persistLocked()
+        return entry
+    }
 
     private fun persistLocked() {
         val tmp = File(indexFile.parentFile, indexFile.name + ".tmp")

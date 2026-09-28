@@ -42,17 +42,23 @@ import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.ArrowForward
 import androidx.compose.material.icons.filled.Brush
 import androidx.compose.material.icons.filled.Clear
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.Gesture
 import androidx.compose.material.icons.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.List
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Redo
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Undo
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.Icon
@@ -245,10 +251,25 @@ fun MuNoteApp(initialPdf: Uri?) {
             error = loadError,
             onImport = { picker.launch(arrayOf("application/pdf")) },
             onOpen = ::openStored,
+            onRename = { entry, title ->
+                scope.launch {
+                    runCatching { library.rename(entry, title) }
+                        .onSuccess { libraryRevision++ }
+                        .onFailure { loadError = it.message ?: "重命名失败" }
+                }
+            },
+            onDelete = { entry ->
+                scope.launch {
+                    runCatching { library.delete(entry) }
+                        .onSuccess { libraryRevision++ }
+                        .onFailure { loadError = it.message ?: "删除失败" }
+                }
+            },
         )
     } else {
         ReaderScreen(
             documentTitle = currentEntry?.title ?: "PDF 笔记",
+            initialPage = currentEntry?.lastPage ?: 0,
             session = session!!,
             indexStore = indexStore!!,
             handwritingIndexStore = handwritingIndexStore!!,
@@ -258,6 +279,13 @@ fun MuNoteApp(initialPdf: Uri?) {
             ocrDone = ocrDone,
             ocrRunning = ocrRunning,
             ocrRevision = ocrRevision,
+            onPageChanged = { page ->
+                currentEntry?.let { entry ->
+                    scope.launch {
+                        currentEntry = library.updateLastPage(entry, page)
+                    }
+                }
+            },
             onClose = ::closeDocument,
             onOpenPdf = { picker.launch(arrayOf("application/pdf")) }
         )
@@ -270,7 +298,65 @@ private fun LibraryHome(
     error: String?,
     onImport: () -> Unit,
     onOpen: (LibraryEntry) -> Unit,
+    onRename: (LibraryEntry, String) -> Unit,
+    onDelete: (LibraryEntry) -> Unit,
 ) {
+    var renameTarget by remember { mutableStateOf<LibraryEntry?>(null) }
+    var renameText by remember { mutableStateOf("") }
+    var deleteTarget by remember { mutableStateOf<LibraryEntry?>(null) }
+
+    renameTarget?.let { entry ->
+        AlertDialog(
+            onDismissRequest = { renameTarget = null },
+            title = { Text("重命名") },
+            text = {
+                OutlinedTextField(
+                    value = renameText,
+                    onValueChange = { renameText = it },
+                    singleLine = true,
+                    label = { Text("文档名称") }
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = renameText.trim().isNotEmpty(),
+                    onClick = {
+                        onRename(entry, renameText)
+                        renameTarget = null
+                    }
+                ) {
+                    Text("保存")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { renameTarget = null }) { Text("取消") }
+            }
+        )
+    }
+
+    deleteTarget?.let { entry ->
+        AlertDialog(
+            onDismissRequest = { deleteTarget = null },
+            title = { Text("删除这个文档？") },
+            text = {
+                Text("会删除 MuNote 本地保存的 PDF、手写笔迹和识别索引。原来文件管理器里的源 PDF 不受影响。")
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        onDelete(entry)
+                        deleteTarget = null
+                    }
+                ) {
+                    Text("删除", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { deleteTarget = null }) { Text("取消") }
+            }
+        )
+    }
+
     Column(
         Modifier
             .fillMaxSize()
@@ -287,7 +373,7 @@ private fun LibraryHome(
                 Column(Modifier.weight(1f)) {
                     Text("MuNote", style = MaterialTheme.typography.headlineSmall)
                     Text(
-                        "手写优先 · 扫描 PDF 可搜索",
+                        "手写优先 · PDF OCR · 手写可搜索",
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         style = MaterialTheme.typography.bodySmall
                     )
@@ -339,7 +425,7 @@ private fun LibraryHome(
                         }
                         Text("把教材或扫描 PDF 放进来")
                         Text(
-                            "首次导入后会保存在本机资料库，之后直接打开，不用重复选文件。",
+                            "首次导入后会保存在本机资料库，之后直接打开，并记住上次阅读位置。",
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             style = MaterialTheme.typography.bodySmall
                         )
@@ -363,9 +449,15 @@ private fun LibraryHome(
                     count = entries.size,
                     key = { entries[it].fingerprint }
                 ) { index ->
+                    val entry = entries[index]
                     LibraryDocumentRow(
-                        entry = entries[index],
-                        onClick = { onOpen(entries[index]) }
+                        entry = entry,
+                        onClick = { onOpen(entry) },
+                        onRename = {
+                            renameText = entry.title
+                            renameTarget = entry
+                        },
+                        onDelete = { deleteTarget = entry },
                     )
                 }
             }
@@ -377,7 +469,11 @@ private fun LibraryHome(
 private fun LibraryDocumentRow(
     entry: LibraryEntry,
     onClick: () -> Unit,
+    onRename: () -> Unit,
+    onDelete: () -> Unit,
 ) {
+    var menuExpanded by remember { mutableStateOf(false) }
+
     Surface(
         onClick = onClick,
         modifier = Modifier.fillMaxWidth(),
@@ -385,7 +481,7 @@ private fun LibraryDocumentRow(
         tonalElevation = 1.dp
     ) {
         Row(
-            Modifier.padding(horizontal = 18.dp, vertical = 16.dp),
+            Modifier.padding(horizontal = 18.dp, vertical = 14.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(14.dp)
         ) {
@@ -406,12 +502,41 @@ private fun LibraryDocumentRow(
                     style = MaterialTheme.typography.titleSmall
                 )
                 Text(
-                    "本地文档 · 打开后自动继续 OCR",
+                    if (entry.lastPage > 0) {
+                        "上次看到第 ${entry.lastPage + 1} 页 · 本地保存"
+                    } else {
+                        "本地保存 · 打开后自动继续 OCR"
+                    },
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     style = MaterialTheme.typography.bodySmall
                 )
             }
-            Icon(Icons.Default.ArrowForward, contentDescription = null)
+            Box {
+                IconButton(onClick = { menuExpanded = true }) {
+                    Icon(Icons.Default.MoreVert, contentDescription = "文档菜单")
+                }
+                DropdownMenu(
+                    expanded = menuExpanded,
+                    onDismissRequest = { menuExpanded = false }
+                ) {
+                    DropdownMenuItem(
+                        text = { Text("重命名") },
+                        leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null) },
+                        onClick = {
+                            menuExpanded = false
+                            onRename()
+                        }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("删除") },
+                        leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null) },
+                        onClick = {
+                            menuExpanded = false
+                            onDelete()
+                        }
+                    )
+                }
+            }
         }
     }
 }
@@ -420,6 +545,7 @@ private fun LibraryDocumentRow(
 @Composable
 private fun ReaderScreen(
     documentTitle: String,
+    initialPage: Int,
     session: PdfSession,
     indexStore: OcrIndexStore,
     handwritingIndexStore: HandwritingIndexStore,
@@ -429,12 +555,16 @@ private fun ReaderScreen(
     ocrDone: Int,
     ocrRunning: Boolean,
     ocrRevision: Int,
+    onPageChanged: (Int) -> Unit,
     onClose: () -> Unit,
     onOpenPdf: () -> Unit,
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val pager = rememberPagerState(pageCount = { session.pageCount })
+    val pager = rememberPagerState(
+        initialPage = initialPage.coerceIn(0, (session.pageCount - 1).coerceAtLeast(0)),
+        pageCount = { session.pageCount }
+    )
     var query by remember { mutableStateOf("") }
     var hits by remember { mutableStateOf<List<SearchHit>>(emptyList()) }
     var selectedHit by remember { mutableIntStateOf(0) }
@@ -510,6 +640,10 @@ private fun ReaderScreen(
         hits = (indexStore.search(query) + handwritingIndexStore.search(query))
             .sortedWith(compareBy<SearchHit> { it.pageIndex }.thenBy { it.source.ordinal })
         selectedHit = selectedHit.coerceIn(0, (hits.size - 1).coerceAtLeast(0))
+    }
+
+    LaunchedEffect(pager.currentPage) {
+        onPageChanged(pager.currentPage)
     }
 
     Column(
