@@ -4,6 +4,8 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Color
+import android.graphics.Paint
+import android.graphics.pdf.PdfDocument
 import android.graphics.pdf.PdfRenderer
 import android.net.Uri
 import android.os.ParcelFileDescriptor
@@ -16,7 +18,14 @@ import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.io.File
 import java.io.FileOutputStream
+import java.util.UUID
 import kotlin.math.max
+
+@Serializable
+enum class DocumentKind { PDF, NOTE }
+
+@Serializable
+enum class PageTemplate { BLANK, RULED, GRID, DOT }
 
 @Serializable
 data class LibraryEntry(
@@ -27,6 +36,9 @@ data class LibraryEntry(
     val lastPage: Int = 0,
     val bookmarks: Set<Int> = emptySet(),
     val hasCustomCover: Boolean = false,
+    val kind: DocumentKind = DocumentKind.PDF,
+    val pageTemplate: PageTemplate = PageTemplate.BLANK,
+    val notePageCount: Int = 0,
 )
 
 @Serializable
@@ -37,8 +49,9 @@ private data class LibraryIndex(
 /**
  * Local-first document library.
  *
- * Imported PDFs live under files/documents/<sha256>.pdf. Optional custom cover images are copied
- * into app-private storage as well, so a library card never depends on a temporary external URI.
+ * Imported PDFs live under files/documents/<id>.pdf. Native notebooks use a stable UUID-backed ID
+ * so their background PDF can be regenerated when pages are appended without changing the ink,
+ * text, OCR, or cover keys associated with the document.
  */
 class PdfLibrary(private val context: Context) {
     private val json = Json { ignoreUnknownKeys = true; prettyPrint = false }
@@ -92,12 +105,67 @@ class PdfLibrary(private val context: Context) {
                 lastPage = previous?.lastPage ?: 0,
                 bookmarks = previous?.bookmarks ?: emptySet(),
                 hasCustomCover = previous?.hasCustomCover ?: coverFile(fingerprint).exists(),
+                kind = previous?.kind ?: DocumentKind.PDF,
+                pageTemplate = previous?.pageTemplate ?: PageTemplate.BLANK,
+                notePageCount = previous?.notePageCount ?: 0,
             )
             synchronized(this@PdfLibrary) {
                 entries[fingerprint] = entry
                 persistLocked()
             }
             entry
+        }
+
+    suspend fun createNotebook(
+        title: String,
+        template: PageTemplate,
+    ): LibraryEntry = withContext(Dispatchers.IO) {
+        val now = System.currentTimeMillis()
+        val fingerprint = "note-" + UUID.randomUUID().toString().replace("-", "")
+        val normalizedTitle = title.trim().ifBlank {
+            context.getString(R.string.default_notebook_title)
+        }
+        writeNotebookPdf(
+            file = documentFile(fingerprint),
+            template = template,
+            pageCount = 1,
+        )
+        val entry = LibraryEntry(
+            fingerprint = fingerprint,
+            title = normalizedTitle,
+            importedAt = now,
+            lastOpenedAt = now,
+            kind = DocumentKind.NOTE,
+            pageTemplate = template,
+            notePageCount = 1,
+        )
+        synchronized(this@PdfLibrary) {
+            entries[fingerprint] = entry
+            persistLocked()
+        }
+        entry
+    }
+
+    suspend fun appendNotebookPage(entry: LibraryEntry): LibraryEntry =
+        withContext(Dispatchers.IO) {
+            require(entry.kind == DocumentKind.NOTE) {
+                context.getString(R.string.error_not_notebook)
+            }
+            val current = synchronized(this@PdfLibrary) {
+                entries[entry.fingerprint] ?: entry
+            }
+            val nextCount = current.notePageCount.coerceAtLeast(1) + 1
+            writeNotebookPdf(
+                file = documentFile(current.fingerprint),
+                template = current.pageTemplate,
+                pageCount = nextCount,
+            )
+            update(
+                current.copy(
+                    notePageCount = nextCount,
+                    lastOpenedAt = System.currentTimeMillis(),
+                )
+            )
         }
 
     suspend fun touch(entry: LibraryEntry): LibraryEntry = withContext(Dispatchers.IO) {
@@ -116,7 +184,11 @@ class PdfLibrary(private val context: Context) {
     suspend fun rename(entry: LibraryEntry, newTitle: String): LibraryEntry =
         withContext(Dispatchers.IO) {
             val title = newTitle.trim().ifBlank {
-                context.getString(R.string.default_pdf_note)
+                if (entry.kind == DocumentKind.NOTE) {
+                    context.getString(R.string.default_notebook_title)
+                } else {
+                    context.getString(R.string.default_pdf_note)
+                }
             }
             val current = synchronized(this@PdfLibrary) {
                 entries[entry.fingerprint] ?: entry
@@ -196,6 +268,90 @@ class PdfLibrary(private val context: Context) {
     private fun coverFile(fingerprint: String): File =
         File(coversDir, "${fingerprint}.cover")
 
+    private fun writeNotebookPdf(
+        file: File,
+        template: PageTemplate,
+        pageCount: Int,
+    ) {
+        val temp = File(file.parentFile, file.name + ".tmp")
+        val document = PdfDocument()
+        try {
+            repeat(pageCount.coerceAtLeast(1)) { pageIndex ->
+                val info = PdfDocument.PageInfo.Builder(
+                    NOTE_PAGE_WIDTH,
+                    NOTE_PAGE_HEIGHT,
+                    pageIndex + 1,
+                ).create()
+                val page = document.startPage(info)
+                try {
+                    page.canvas.drawColor(Color.WHITE)
+                    drawTemplate(page.canvas, template)
+                } finally {
+                    document.finishPage(page)
+                }
+            }
+            FileOutputStream(temp).use { document.writeTo(it) }
+        } finally {
+            document.close()
+        }
+
+        if (file.exists()) file.delete()
+        check(temp.renameTo(file)) { context.getString(R.string.error_notebook_save) }
+    }
+
+    private fun drawTemplate(
+        canvas: android.graphics.Canvas,
+        template: PageTemplate,
+    ) {
+        if (template == PageTemplate.BLANK) return
+
+        val guidePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.rgb(218, 222, 229)
+            strokeWidth = 1.4f
+            style = Paint.Style.STROKE
+        }
+        val step = 72f
+        val top = 110f
+        val bottom = NOTE_PAGE_HEIGHT - 70f
+
+        when (template) {
+            PageTemplate.BLANK -> Unit
+            PageTemplate.RULED -> {
+                var y = top
+                while (y <= bottom) {
+                    canvas.drawLine(70f, y, NOTE_PAGE_WIDTH - 70f, y, guidePaint)
+                    y += step
+                }
+            }
+
+            PageTemplate.GRID -> {
+                var y = top
+                while (y <= bottom) {
+                    canvas.drawLine(55f, y, NOTE_PAGE_WIDTH - 55f, y, guidePaint)
+                    y += step
+                }
+                var x = 55f
+                while (x <= NOTE_PAGE_WIDTH - 55f) {
+                    canvas.drawLine(x, top, x, bottom, guidePaint)
+                    x += step
+                }
+            }
+
+            PageTemplate.DOT -> {
+                guidePaint.style = Paint.Style.FILL
+                var y = top
+                while (y <= bottom) {
+                    var x = 70f
+                    while (x <= NOTE_PAGE_WIDTH - 70f) {
+                        canvas.drawCircle(x, y, 2.2f, guidePaint)
+                        x += step
+                    }
+                    y += step
+                }
+            }
+        }
+    }
+
     private fun renderFirstPdfPage(file: File, targetWidthPx: Int): Bitmap? {
         if (!file.exists()) return null
         val descriptor = ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)
@@ -259,5 +415,10 @@ class PdfLibrary(private val context: Context) {
         tmp.writeText(json.encodeToString(LibraryIndex(entries.values.toList())))
         if (indexFile.exists()) indexFile.delete()
         tmp.renameTo(indexFile)
+    }
+
+    companion object {
+        private const val NOTE_PAGE_WIDTH = 1240
+        private const val NOTE_PAGE_HEIGHT = 1754
     }
 }
