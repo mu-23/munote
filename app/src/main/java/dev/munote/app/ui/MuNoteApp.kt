@@ -9,6 +9,8 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -62,6 +64,7 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.StarBorder
 import androidx.compose.material.icons.filled.TouchApp
+import androidx.compose.material.icons.filled.TextFields
 import androidx.compose.material.icons.filled.Undo
 import androidx.compose.material.icons.filled.ZoomIn
 import androidx.compose.material.icons.filled.ZoomOut
@@ -93,6 +96,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
@@ -103,6 +108,7 @@ import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -125,6 +131,8 @@ import dev.munote.app.pdf.LibraryEntry
 import dev.munote.app.pdf.PdfExporter
 import dev.munote.app.pdf.PdfLibrary
 import dev.munote.app.pdf.PdfSession
+import dev.munote.app.text.TextBoxNote
+import dev.munote.app.text.TextStore
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -145,6 +153,7 @@ fun MuNoteApp(initialPdf: Uri?) {
     var indexStore by remember { mutableStateOf<OcrIndexStore?>(null) }
     var handwritingIndexStore by remember { mutableStateOf<HandwritingIndexStore?>(null) }
     var inkStore by remember { mutableStateOf<InkStore?>(null) }
+    var textStore by remember { mutableStateOf<TextStore?>(null) }
     var loadError by remember { mutableStateOf<String?>(null) }
     var ocrDone by remember { mutableIntStateOf(0) }
     var ocrRunning by remember { mutableStateOf(false) }
@@ -159,6 +168,7 @@ fun MuNoteApp(initialPdf: Uri?) {
         indexStore = OcrIndexStore(context, next.fingerprint)
         handwritingIndexStore = HandwritingIndexStore(context, next.fingerprint)
         inkStore = InkStore(context, next.fingerprint)
+        textStore = TextStore(context, next.fingerprint)
         ocrDone = indexStore?.completedPages() ?: 0
         ocrRevision++
         libraryRevision++
@@ -199,6 +209,7 @@ fun MuNoteApp(initialPdf: Uri?) {
         indexStore = null
         handwritingIndexStore = null
         inkStore = null
+        textStore = null
         ocrDone = 0
         ocrRunning = false
         ocrRevision++
@@ -309,6 +320,7 @@ fun MuNoteApp(initialPdf: Uri?) {
             handwritingRecognizer = handwritingRecognizer,
             handwritingModelState = handwritingModelState,
             inkStore = inkStore!!,
+            textStore = textStore!!,
             ocrDone = ocrDone,
             ocrRunning = ocrRunning,
             ocrRevision = ocrRevision,
@@ -639,6 +651,7 @@ private fun ReaderScreen(
     handwritingRecognizer: ChineseHandwritingRecognizer,
     handwritingModelState: HandwritingModelState,
     inkStore: InkStore,
+    textStore: TextStore,
     ocrDone: Int,
     ocrRunning: Boolean,
     ocrRevision: Int,
@@ -661,6 +674,8 @@ private fun ReaderScreen(
     var tool by remember { mutableStateOf(InkTool.PEN) }
     var inkRevision by remember { mutableIntStateOf(0) }
     var handwritingRevision by remember { mutableIntStateOf(0) }
+    var textRevision by remember { mutableIntStateOf(0) }
+    var activeTextBoxId by remember { mutableStateOf<String?>(null) }
     var activeInkView by remember { mutableStateOf<InkCanvasView?>(null) }
     var lassoSelectionActive by remember { mutableStateOf(false) }
     var showThumbnails by remember { mutableStateOf(false) }
@@ -762,14 +777,19 @@ private fun ReaderScreen(
         handwritingRevision++
     }
 
-    LaunchedEffect(query, ocrRevision, handwritingRevision) {
-        hits = (indexStore.search(query) + handwritingIndexStore.search(query))
+    LaunchedEffect(query, ocrRevision, handwritingRevision, textRevision) {
+        hits = (
+            indexStore.search(query) +
+                handwritingIndexStore.search(query) +
+                textStore.search(query)
+            )
             .sortedWith(compareBy<SearchHit> { it.pageIndex }.thenBy { it.source.ordinal })
         selectedHit = selectedHit.coerceIn(0, (hits.size - 1).coerceAtLeast(0))
     }
 
     LaunchedEffect(pager.currentPage) {
         lassoSelectionActive = false
+        activeTextBoxId = null
         activeInkView = null
         onPageChanged(pager.currentPage)
     }
@@ -982,12 +1002,14 @@ private fun ReaderScreen(
                                 AssistChip(
                                     onClick = { scope.launch { goToHit(index) } },
                                     label = {
-                                        val sourceLabel =
-                                            if (hit.source == SearchSource.HANDWRITING) {
+                                        val sourceLabel = when (hit.source) {
+                                            SearchSource.HANDWRITING ->
                                                 stringResource(R.string.search_source_handwriting)
-                                            } else {
+                                            SearchSource.TEXT ->
+                                                stringResource(R.string.search_source_text)
+                                            SearchSource.PDF ->
                                                 stringResource(R.string.search_source_pdf)
-                                            }
+                                        }
                                         Text(
                                             stringResource(
                                                 R.string.search_result_label,
@@ -1036,12 +1058,35 @@ private fun ReaderScreen(
                     pageIndex = page,
                     tool = tool,
                     strokes = remember(inkRevision, page) { inkStore.page(page) },
+                    textBoxes = remember(textRevision, page) { textStore.page(page) },
+                    activeTextBoxId = activeTextBoxId,
                     highlight = hits.getOrNull(selectedHit)?.takeIf { it.pageIndex == page },
                     inkColor = if (tool == InkTool.HIGHLIGHTER) highlighterColor else penColor,
                     penWidthDp = penWidth,
                     highlighterWidthDp = highlighterWidth,
                     fingerWritingEnabled = fingerWriting,
                     onShowPageOverview = ::openPageOverview,
+                    onAddTextBox = { x, y ->
+                        scope.launch {
+                            val box = textStore.add(page, x, y)
+                            activeTextBoxId = box.id
+                            textRevision++
+                        }
+                    },
+                    onUpdateTextBox = { box ->
+                        scope.launch {
+                            textStore.update(page, box)
+                            textRevision++
+                        }
+                    },
+                    onDeleteTextBox = { id ->
+                        scope.launch {
+                            textStore.delete(page, id)
+                            if (activeTextBoxId == id) activeTextBoxId = null
+                            textRevision++
+                        }
+                    },
+                    onActivateTextBox = { id -> activeTextBoxId = id },
                     onViewReady = { view ->
                         if (page == pager.currentPage) activeInkView = view
                     },
@@ -1170,6 +1215,16 @@ private fun ReaderScreen(
                     icon = { Icon(Icons.Default.Gesture, contentDescription = null) },
                     onClick = {
                         tool = InkTool.LASSO
+                        showPenOptions = false
+                    }
+                )
+                Spacer(Modifier.width(8.dp))
+                ToolButton(
+                    selected = tool == InkTool.TEXT,
+                    label = stringResource(R.string.tool_text),
+                    icon = { Icon(Icons.Default.TextFields, contentDescription = null) },
+                    onClick = {
+                        tool = InkTool.TEXT
                         showPenOptions = false
                     }
                 )
@@ -1578,12 +1633,18 @@ private fun PdfInkPage(
     pageIndex: Int,
     tool: InkTool,
     strokes: List<dev.munote.app.ink.InkStroke>,
+    textBoxes: List<TextBoxNote>,
+    activeTextBoxId: String?,
     highlight: SearchHit?,
     inkColor: Int,
     penWidthDp: Float,
     highlighterWidthDp: Float,
     fingerWritingEnabled: Boolean,
     onShowPageOverview: () -> Unit,
+    onAddTextBox: (Float, Float) -> Unit,
+    onUpdateTextBox: (TextBoxNote) -> Unit,
+    onDeleteTextBox: (String) -> Unit,
+    onActivateTextBox: (String) -> Unit,
     onViewReady: (InkCanvasView) -> Unit,
     onSelectionChanged: (Boolean) -> Unit,
     onPageSwipe: (Int) -> Unit,
@@ -1753,15 +1814,15 @@ private fun PdfInkPage(
 
                 val rect = highlight?.rect
                 if (rect != null) {
-                    val highlightFill = if (highlight.source == SearchSource.HANDWRITING) {
-                        Color(0x5538BDF8)
-                    } else {
-                        Color(0x66FFD54F)
+                    val highlightFill = when (highlight.source) {
+                        SearchSource.HANDWRITING -> Color(0x5538BDF8)
+                        SearchSource.TEXT -> Color(0x5534D399)
+                        SearchSource.PDF -> Color(0x66FFD54F)
                     }
-                    val highlightStroke = if (highlight.source == SearchSource.HANDWRITING) {
-                        Color(0xCC0284C7)
-                    } else {
-                        Color(0xCCF59E0B)
+                    val highlightStroke = when (highlight.source) {
+                        SearchSource.HANDWRITING -> Color(0xCC0284C7)
+                        SearchSource.TEXT -> Color(0xCC059669)
+                        SearchSource.PDF -> Color(0xCCF59E0B)
                     }
                     Canvas(Modifier.fillMaxSize()) {
                         val left = rect.left * size.width
@@ -1816,6 +1877,30 @@ private fun PdfInkPage(
                         if (view.snapshot() != strokes) view.setStrokes(strokes)
                     },
                     modifier = Modifier.fillMaxSize()
+                )
+
+                if (tool == InkTool.TEXT) {
+                    Box(
+                        Modifier
+                            .fillMaxSize()
+                            .pointerInput(pageIndex, textBoxes.size) {
+                                detectTapGestures { offset ->
+                                    onAddTextBox(
+                                        (offset.x / size.width).coerceIn(0f, 1f),
+                                        (offset.y / size.height).coerceIn(0f, 1f)
+                                    )
+                                }
+                            }
+                    )
+                }
+
+                TextBoxLayer(
+                    boxes = textBoxes,
+                    editable = tool == InkTool.TEXT,
+                    activeTextBoxId = activeTextBoxId,
+                    onActivate = onActivateTextBox,
+                    onUpdate = onUpdateTextBox,
+                    onDelete = onDeleteTextBox,
                 )
             }
         }
