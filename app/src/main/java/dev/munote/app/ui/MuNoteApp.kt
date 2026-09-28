@@ -138,6 +138,8 @@ import dev.munote.app.backup.LocalBackupInfo
 import dev.munote.app.backup.LocalBackupManager
 import dev.munote.app.image.ImageStore
 import dev.munote.app.image.PageImageNote
+import dev.munote.app.image.StickerItem
+import dev.munote.app.image.StickerStore
 import dev.munote.app.ink.EraserMode
 import dev.munote.app.ink.InkBrush
 import dev.munote.app.ink.InkCanvasView
@@ -1809,6 +1811,7 @@ private fun ReaderScreen(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val stickerStore = remember { StickerStore(context) }
     val pager = rememberPagerState(
         initialPage = initialPage.coerceIn(0, (session.pageCount - 1).coerceAtLeast(0)),
         pageCount = { session.pageCount }
@@ -1822,6 +1825,8 @@ private fun ReaderScreen(
     var handwritingRevision by remember { mutableIntStateOf(0) }
     var textRevision by remember { mutableIntStateOf(0) }
     var imageRevision by remember { mutableIntStateOf(0) }
+    var stickerRevision by remember { mutableIntStateOf(0) }
+    var showStickerPicker by remember { mutableStateOf(false) }
     var navigationRevision by remember { mutableIntStateOf(0) }
     var showNavigationPanel by remember { mutableStateOf(false) }
     var showAddLink by remember { mutableStateOf(false) }
@@ -1867,6 +1872,41 @@ private fun ReaderScreen(
                 }
             }
         }
+    }
+
+    if (showStickerPicker) {
+        StickerPickerDialog(
+            stickers = remember(stickerRevision) { stickerStore.items() },
+            store = stickerStore,
+            onDismiss = { showStickerPicker = false },
+            onSelect = { sticker ->
+                scope.launch {
+                    runCatching {
+                        imageStore.addSticker(
+                            index = pager.currentPage,
+                            sticker = sticker,
+                            source = stickerStore.fileFor(sticker),
+                        )
+                    }.onSuccess { image ->
+                        activeImageId = image.id
+                        imageRevision++
+                        showStickerPicker = false
+                    }.onFailure { error ->
+                        Toast.makeText(
+                            context,
+                            error.message ?: context.getString(R.string.error_image_insert),
+                            Toast.LENGTH_LONG
+                        ).show()
+                    }
+                }
+            },
+            onDelete = { sticker ->
+                scope.launch {
+                    stickerStore.delete(sticker.id)
+                    stickerRevision++
+                }
+            },
+        )
     }
 
     val exportLauncher = rememberLauncherForActivityResult(
@@ -2521,6 +2561,29 @@ private fun ReaderScreen(
                         }
                     },
                     onActivateImage = { id -> activeImageId = id },
+                    onSaveSticker = { image ->
+                        scope.launch {
+                            runCatching {
+                                stickerStore.saveFromImage(
+                                    source = imageStore.imageFile(image),
+                                    image = image,
+                                )
+                            }.onSuccess {
+                                stickerRevision++
+                                Toast.makeText(
+                                    context,
+                                    context.getString(R.string.toast_sticker_saved),
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                            }.onFailure { error ->
+                                Toast.makeText(
+                                    context,
+                                    error.message ?: context.getString(R.string.error_sticker_save),
+                                    Toast.LENGTH_LONG
+                                ).show()
+                            }
+                        }
+                    },
                     onNavigateLink = { target ->
                         scope.launch { jumpToPage(target) }
                     },
@@ -2585,6 +2648,11 @@ private fun ReaderScreen(
                         Icon(Icons.Default.Image, contentDescription = null)
                         Spacer(Modifier.width(6.dp))
                         Text(stringResource(R.string.action_insert_image))
+                    }
+                    TextButton(onClick = { showStickerPicker = true }) {
+                        Icon(Icons.Default.StarBorder, contentDescription = null)
+                        Spacer(Modifier.width(6.dp))
+                        Text(stringResource(R.string.action_stickers))
                     }
                     Text(
                         stringResource(R.string.image_edit_hint),
@@ -3729,6 +3797,140 @@ private fun TextBoxLayer(
 }
 
 @Composable
+private fun StickerPickerDialog(
+    stickers: List<StickerItem>,
+    store: StickerStore,
+    onDismiss: () -> Unit,
+    onSelect: (StickerItem) -> Unit,
+    onDelete: (StickerItem) -> Unit,
+) {
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth(0.88f)
+                .fillMaxHeight(0.76f),
+            shape = RoundedCornerShape(24.dp),
+            tonalElevation = 6.dp
+        ) {
+            Column(Modifier.fillMaxSize()) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 18.dp, vertical = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            stringResource(R.string.sticker_library_title),
+                            style = MaterialTheme.typography.titleLarge
+                        )
+                        Text(
+                            stringResource(R.string.sticker_library_hint),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    TextButton(onClick = onDismiss) {
+                        Text(stringResource(R.string.action_close))
+                    }
+                }
+
+                if (stickers.isEmpty()) {
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxWidth(),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            stringResource(R.string.sticker_library_empty),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                } else {
+                    LazyVerticalGrid(
+                        columns = GridCells.Adaptive(118.dp),
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxWidth(),
+                        contentPadding = PaddingValues(14.dp),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        items(
+                            count = stickers.size,
+                            key = { stickers[it].id }
+                        ) { index ->
+                            val sticker = stickers[index]
+                            val bitmap by produceState<Bitmap?>(
+                                initialValue = null,
+                                sticker.id,
+                                sticker.fileName,
+                                sticker.cropLeft,
+                                sticker.cropTop,
+                                sticker.cropRight,
+                                sticker.cropBottom,
+                            ) {
+                                value = store.loadBitmap(sticker, 420)
+                            }
+
+                            Surface(
+                                onClick = { onSelect(sticker) },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .aspectRatio(1f),
+                                shape = RoundedCornerShape(14.dp),
+                                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)
+                            ) {
+                                Box(Modifier.fillMaxSize()) {
+                                    val bmp = bitmap
+                                    if (bmp != null) {
+                                        Image(
+                                            bitmap = bmp.asImageBitmap(),
+                                            contentDescription = stringResource(
+                                                R.string.sticker_item_description
+                                            ),
+                                            modifier = Modifier
+                                                .fillMaxSize()
+                                                .padding(8.dp),
+                                            contentScale = ContentScale.Fit
+                                        )
+                                    } else {
+                                        CircularProgressIndicator(
+                                            modifier = Modifier
+                                                .align(Alignment.Center)
+                                                .size(24.dp),
+                                            strokeWidth = 2.dp
+                                        )
+                                    }
+
+                                    IconButton(
+                                        onClick = { onDelete(sticker) },
+                                        modifier = Modifier
+                                            .align(Alignment.TopEnd)
+                                            .size(32.dp)
+                                    ) {
+                                        Icon(
+                                            Icons.Default.Delete,
+                                            contentDescription = stringResource(
+                                                R.string.sticker_delete
+                                            )
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun PageImageLayer(
     images: List<PageImageNote>,
     store: ImageStore,
@@ -3737,6 +3939,7 @@ private fun PageImageLayer(
     onActivate: (String) -> Unit,
     onUpdate: (PageImageNote) -> Unit,
     onDelete: (String) -> Unit,
+    onSaveSticker: (PageImageNote) -> Unit,
 ) {
     var cropTarget by remember { mutableStateOf<PageImageNote?>(null) }
 
@@ -3961,6 +4164,15 @@ private fun PageImageLayer(
                                     contentDescription = stringResource(
                                         if (localImage.locked) R.string.image_unlock else R.string.image_lock
                                     )
+                                )
+                            }
+                            IconButton(
+                                onClick = { onSaveSticker(localImage) },
+                                modifier = Modifier.size(30.dp)
+                            ) {
+                                Icon(
+                                    Icons.Default.StarBorder,
+                                    contentDescription = stringResource(R.string.image_save_as_sticker)
                                 )
                             }
                             IconButton(
@@ -4275,6 +4487,7 @@ private fun PdfInkPage(
     onUpdateImage: (PageImageNote) -> Unit,
     onDeleteImage: (String) -> Unit,
     onActivateImage: (String) -> Unit,
+    onSaveSticker: (PageImageNote) -> Unit,
     onNavigateLink: (Int) -> Unit,
     onUpdateLink: (PageLink) -> Unit,
     onViewReady: (InkCanvasView) -> Unit,
@@ -4524,6 +4737,7 @@ private fun PdfInkPage(
                         onActivate = onActivateImage,
                         onUpdate = onUpdateImage,
                         onDelete = onDeleteImage,
+                        onSaveSticker = onSaveSticker,
                     )
                 }
 
@@ -4574,6 +4788,7 @@ private fun PdfInkPage(
                         onActivate = onActivateImage,
                         onUpdate = onUpdateImage,
                         onDelete = onDeleteImage,
+                        onSaveSticker = onSaveSticker,
                     )
                 }
 

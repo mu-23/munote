@@ -211,4 +211,15 @@
     <string name="split_pdf_document">PDF document</string>
 
     <string name="action_open">Open</string>
+
+    <string name="action_stickers">Stickers</string>
+    <string name="image_save_as_sticker">Save as sticker</string>
+    <string name="sticker_library_title">Sticker library</string>
+    <string name="sticker_library_hint">Save a selected image as a sticker, then reuse it in any MuNote document.</string>
+    <string name="sticker_library_empty">No stickers yet. Select an image and use the star button to save it here.</string>
+    <string name="sticker_item_description">Sticker</string>
+    <string name="sticker_delete">Delete sticker</string>
+    <string name="toast_sticker_saved">Saved to sticker library</string>
+    <string name="error_sticker_save">Unable to save sticker</string>
+
 </resources>

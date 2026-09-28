@@ -98,6 +98,54 @@ class ImageStore(
         image
     }
 
+    suspend fun addSticker(
+        index: Int,
+        sticker: StickerItem,
+        source: File,
+    ): PageImageNote = withContext(Dispatchers.IO) {
+        require(source.exists()) { "Sticker file is missing" }
+
+        val id = UUID.randomUUID().toString()
+        val extension = source.extension.ifBlank { "img" }
+        val fileName = "$id.$extension"
+        val target = File(mediaDir, fileName)
+        val temp = File(mediaDir, "$fileName.tmp")
+        source.inputStream().use { input ->
+            FileOutputStream(temp).use { output ->
+                input.copyTo(output, 512 * 1024)
+            }
+        }
+        if (target.exists()) target.delete()
+        check(temp.renameTo(target)) { "Unable to insert sticker" }
+
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeFile(target.absolutePath, bounds)
+        val croppedWidth = (
+            bounds.outWidth * (sticker.cropRight - sticker.cropLeft).coerceAtLeast(0.05f)
+            ).coerceAtLeast(1f)
+        val croppedHeight = (
+            bounds.outHeight * (sticker.cropBottom - sticker.cropTop).coerceAtLeast(0.05f)
+            ).coerceAtLeast(1f)
+        val aspect = croppedWidth / croppedHeight
+        val width = 0.36f
+        val pageAspect = 1240f / 1754f
+        val height = (width * pageAspect / aspect).coerceIn(0.10f, 0.52f)
+
+        val image = PageImageNote(
+            id = id,
+            fileName = fileName,
+            width = width,
+            height = height,
+            cropLeft = sticker.cropLeft,
+            cropTop = sticker.cropTop,
+            cropRight = sticker.cropRight,
+            cropBottom = sticker.cropBottom,
+        )
+        pages.getOrPut(index) { mutableListOf() }.add(image)
+        persist()
+        image
+    }
+
     suspend fun update(index: Int, image: PageImageNote) = withContext(Dispatchers.IO) {
         val list = pages.getOrPut(index) { mutableListOf() }
         val position = list.indexOfFirst { it.id == image.id }
