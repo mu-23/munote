@@ -202,4 +202,12 @@
     <string name="page_links_section">Links on this page</string>
     <string name="page_links_empty">No page links here yet</string>
 
+
+    <string name="action_split_view">Split view</string>
+    <string name="action_close_split">Close split</string>
+    <string name="split_picker_title">Choose the second document</string>
+    <string name="split_picker_hint">Open the current document again for two independent pages side by side, or choose a different document.</string>
+    <string name="split_same_document">Current document · open another view</string>
+    <string name="split_pdf_document">PDF document</string>
+
 </resources>

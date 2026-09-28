@@ -202,4 +202,12 @@
     <string name="page_links_section">本页跳转链接</string>
     <string name="page_links_empty">本页还没有跳转链接</string>
 
+
+    <string name="action_split_view">双开</string>
+    <string name="action_close_split">关闭双开</string>
+    <string name="split_picker_title">选择右侧文档</string>
+    <string name="split_picker_hint">可以再次打开当前文档，实现同一本 PDF / 笔记的前后两页并排；也可以选择另一个文档。</string>
+    <string name="split_same_document">当前文档 · 可用于同文档双开</string>
+    <string name="split_pdf_document">PDF 文档</string>
+
 </resources>
