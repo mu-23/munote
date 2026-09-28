@@ -71,8 +71,21 @@ class PdfSession private constructor(
             val fingerprint = sha256(temp)
             val finalFile = File(docsDir, "${fingerprint}.pdf")
             if (finalFile.exists()) temp.delete() else temp.renameTo(finalFile)
-            val pfd = ParcelFileDescriptor.open(finalFile, ParcelFileDescriptor.MODE_READ_ONLY)
-            PdfSession(finalFile, fingerprint, pfd, PdfRenderer(pfd))
+            openFile(finalFile, fingerprint)
+        }
+
+        suspend fun openStored(
+            context: Context,
+            fingerprint: String,
+        ): PdfSession = withContext(Dispatchers.IO) {
+            val file = File(File(context.filesDir, "documents"), "${fingerprint}.pdf")
+            require(file.exists()) { "本地 PDF 已不存在" }
+            openFile(file, fingerprint)
+        }
+
+        private fun openFile(file: File, fingerprint: String): PdfSession {
+            val pfd = ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)
+            return PdfSession(file, fingerprint, pfd, PdfRenderer(pfd))
         }
 
         private fun sha256(file: File): String {
