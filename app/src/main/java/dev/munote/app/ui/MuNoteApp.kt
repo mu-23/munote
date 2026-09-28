@@ -61,7 +61,7 @@ import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.Gesture
 import androidx.compose.material.icons.filled.History
-import androidx.compose.material.icons.filled.Image as ImageIcon
+import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.LockOpen
@@ -2010,7 +2010,7 @@ private fun ReaderScreen(
                     TextButton(
                         onClick = { imagePicker.launch(arrayOf("image/*")) }
                     ) {
-                        Icon(ImageIcon, contentDescription = null)
+                        Icon(Icons.Default.Image, contentDescription = null)
                         Spacer(Modifier.width(6.dp))
                         Text(stringResource(R.string.action_insert_image))
                     }
@@ -2136,7 +2136,7 @@ private fun ReaderScreen(
                 ToolButton(
                     selected = tool == InkTool.IMAGE,
                     label = stringResource(R.string.tool_image),
-                    icon = { Icon(ImageIcon, contentDescription = null) },
+                    icon = { Icon(Icons.Default.Image, contentDescription = null) },
                     onClick = {
                         tool = InkTool.IMAGE
                         showPenOptions = false
