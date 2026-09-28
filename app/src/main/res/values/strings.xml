@@ -222,4 +222,8 @@
     <string name="toast_sticker_saved">已保存到贴纸库</string>
     <string name="error_sticker_save">保存贴纸失败</string>
 
+
+    <string name="page_overview_manage_pdf_hint">长按并拖动页面即可排序；右上角菜单可以复制或删除页面。这里只改变 MuNote 里的页面顺序，原始 PDF 文件不会被改写。</string>
+    <string name="error_page_update">页面管理操作失败</string>
+
 </resources>

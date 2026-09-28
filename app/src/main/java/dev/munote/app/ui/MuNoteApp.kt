@@ -211,6 +211,15 @@ fun MuNoteApp(initialPdf: Uri?) {
     var backupRevision by remember { mutableIntStateOf(0) }
     var coverTarget by remember { mutableStateOf<LibraryEntry?>(null) }
 
+    suspend fun openEntrySession(entry: LibraryEntry): PdfSession =
+        PdfSession.openStored(
+            context = context,
+            fingerprint = entry.fingerprint,
+            pageOrder = entry.pdfPageOrder.takeIf {
+                entry.kind == DocumentKind.PDF && it.isNotEmpty()
+            },
+        )
+
     fun closeSplit() {
         splitSession?.close()
         splitSession = null
@@ -254,7 +263,7 @@ fun MuNoteApp(initialPdf: Uri?) {
         scope.launch {
             loadError = null
             runCatching {
-                val next = PdfSession.openStored(context, entry.fingerprint)
+                val next = openEntrySession(entry)
                 val touched = library.touch(entry)
                 attachSplitSession(next, touched)
             }.onFailure {
@@ -284,8 +293,14 @@ fun MuNoteApp(initialPdf: Uri?) {
             loadError = null
             runCatching {
                 val title = library.displayName(uri)
-                val next = PdfSession.open(context, uri)
-                val entry = library.registerImported(next.fingerprint, title)
+                val imported = PdfSession.open(context, uri)
+                val entry = library.registerImported(
+                    fingerprint = imported.fingerprint,
+                    title = title,
+                    pageCount = imported.sourcePageCount,
+                )
+                imported.close()
+                val next = openEntrySession(entry)
                 attachSession(next, entry)
             }.onFailure {
                 loadError = it.message ?: context.getString(R.string.error_pdf_open)
@@ -297,7 +312,7 @@ fun MuNoteApp(initialPdf: Uri?) {
         scope.launch {
             loadError = null
             runCatching {
-                val next = PdfSession.openStored(context, entry.fingerprint)
+                val next = openEntrySession(entry)
                 val touched = library.touch(entry)
                 attachSession(next, touched)
             }.onFailure {
@@ -434,7 +449,7 @@ fun MuNoteApp(initialPdf: Uri?) {
                     loadError = null
                     runCatching {
                         val entry = library.createNotebook(title, template)
-                        val next = PdfSession.openStored(context, entry.fingerprint)
+                        val next = openEntrySession(entry)
                         attachSession(next, entry)
                     }.onFailure {
                         loadError = it.message ?: context.getString(R.string.error_notebook_save)
@@ -557,6 +572,7 @@ fun MuNoteApp(initialPdf: Uri?) {
             ocrRevision = ocrRevision,
             bookmarks = currentEntry?.bookmarks ?: emptySet(),
             isNotebook = currentEntry?.kind == DocumentKind.NOTE && !splitMode,
+            canManagePages = !splitMode,
             onAddPage = {
                 currentEntry?.takeIf { it.kind == DocumentKind.NOTE }?.let { entry ->
                     scope.launch {
@@ -567,7 +583,7 @@ fun MuNoteApp(initialPdf: Uri?) {
                             val appended = library.appendNotebookPage(entry)
                             val lastPage = appended.notePageCount.coerceAtLeast(1) - 1
                             val updated = library.updateLastPage(appended, lastPage)
-                            val next = PdfSession.openStored(context, updated.fingerprint)
+                            val next = openEntrySession(updated)
                             attachSession(next, updated)
                         }.onFailure {
                             loadError = it.message ?: context.getString(R.string.error_notebook_save)
@@ -577,64 +593,98 @@ fun MuNoteApp(initialPdf: Uri?) {
                 }
             },
             onDeletePage = { page ->
-                currentEntry?.takeIf { it.kind == DocumentKind.NOTE }?.let { entry ->
+                currentEntry?.let { entry ->
                     scope.launch {
                         loadError = null
                         runCatching {
-                            val updated = library.deleteNotebookPage(entry, page)
+                            val activeSession = requireNotNull(session)
+                            val updated = when (entry.kind) {
+                                DocumentKind.NOTE ->
+                                    library.deleteNotebookPage(entry, page)
+                                DocumentKind.PDF ->
+                                    library.deletePdfPage(
+                                        entry = entry,
+                                        pageIndex = page,
+                                        sourcePageCount = activeSession.sourcePageCount,
+                                    )
+                            }
                             inkStore?.deletePage(page)
                             textStore?.deletePage(page)
                             imageStore?.deletePage(page)
                             navigationStore?.deletePage(page)
                             handwritingIndexStore?.deletePage(page)
-                            session?.close()
+                            indexStore?.deletePage(page)
+                            activeSession.close()
                             session = null
-                            val next = PdfSession.openStored(context, updated.fingerprint)
+                            val next = openEntrySession(updated)
                             attachSession(next, updated)
                         }.onFailure {
-                            loadError = it.message ?: context.getString(R.string.error_notebook_save)
+                            loadError = it.message ?: context.getString(R.string.error_page_update)
                         }
                     }
                 }
             },
             onDuplicatePage = { page ->
-                currentEntry?.takeIf { it.kind == DocumentKind.NOTE }?.let { entry ->
+                currentEntry?.let { entry ->
                     scope.launch {
                         loadError = null
                         runCatching {
-                            val updated = library.duplicateNotebookPage(entry, page)
+                            val activeSession = requireNotNull(session)
+                            val updated = when (entry.kind) {
+                                DocumentKind.NOTE ->
+                                    library.duplicateNotebookPage(entry, page)
+                                DocumentKind.PDF ->
+                                    library.duplicatePdfPage(
+                                        entry = entry,
+                                        pageIndex = page,
+                                        sourcePageCount = activeSession.sourcePageCount,
+                                    )
+                            }
                             inkStore?.duplicatePage(page)
                             textStore?.duplicatePage(page)
                             imageStore?.duplicatePage(page)
                             navigationStore?.duplicatePage(page)
                             handwritingIndexStore?.duplicatePage(page)
-                            session?.close()
+                            indexStore?.duplicatePage(page)
+                            activeSession.close()
                             session = null
-                            val next = PdfSession.openStored(context, updated.fingerprint)
+                            val next = openEntrySession(updated)
                             attachSession(next, updated)
                         }.onFailure {
-                            loadError = it.message ?: context.getString(R.string.error_notebook_save)
+                            loadError = it.message ?: context.getString(R.string.error_page_update)
                         }
                     }
                 }
             },
             onMovePage = { from, to ->
-                currentEntry?.takeIf { it.kind == DocumentKind.NOTE }?.let { entry ->
+                currentEntry?.let { entry ->
                     scope.launch {
                         loadError = null
                         runCatching {
-                            val updated = library.moveNotebookPage(entry, from, to)
+                            val activeSession = requireNotNull(session)
+                            val updated = when (entry.kind) {
+                                DocumentKind.NOTE ->
+                                    library.moveNotebookPage(entry, from, to)
+                                DocumentKind.PDF ->
+                                    library.movePdfPage(
+                                        entry = entry,
+                                        fromIndex = from,
+                                        toIndex = to,
+                                        sourcePageCount = activeSession.sourcePageCount,
+                                    )
+                            }
                             inkStore?.movePage(from, to)
                             textStore?.movePage(from, to)
                             imageStore?.movePage(from, to)
                             navigationStore?.movePage(from, to)
                             handwritingIndexStore?.movePage(from, to)
-                            session?.close()
+                            indexStore?.movePage(from, to)
+                            activeSession.close()
                             session = null
-                            val next = PdfSession.openStored(context, updated.fingerprint)
+                            val next = openEntrySession(updated)
                             attachSession(next, updated)
                         }.onFailure {
-                            loadError = it.message ?: context.getString(R.string.error_notebook_save)
+                            loadError = it.message ?: context.getString(R.string.error_page_update)
                         }
                     }
                 }
@@ -647,7 +697,7 @@ fun MuNoteApp(initialPdf: Uri?) {
                             val updated = library.setNotebookPageTemplate(entry, page, template)
                             session?.close()
                             session = null
-                            val next = PdfSession.openStored(context, updated.fingerprint)
+                            val next = openEntrySession(updated)
                             attachSession(next, updated)
                         }.onFailure {
                             loadError = it.message ?: context.getString(R.string.error_notebook_save)
@@ -729,6 +779,7 @@ fun MuNoteApp(initialPdf: Uri?) {
                     ocrRevision = splitOcrRevision,
                     bookmarks = secondaryEntry.bookmarks,
                     isNotebook = false,
+                    canManagePages = false,
                     onAddPage = {},
                     onDeletePage = {},
                     onDuplicatePage = {},
@@ -1796,6 +1847,7 @@ private fun ReaderScreen(
     ocrRevision: Int,
     bookmarks: Set<Int>,
     isNotebook: Boolean,
+    canManagePages: Boolean,
     onAddPage: () -> Unit,
     onDeletePage: (Int) -> Unit,
     onDuplicatePage: (Int) -> Unit,
@@ -2248,6 +2300,7 @@ private fun ReaderScreen(
             currentPage = pager.currentPage,
             bookmarks = bookmarks,
             isNotebook = isNotebook,
+            canManagePages = canManagePages,
             onDismiss = { showPageOverview = false },
             onSelectPage = { page ->
                 showPageOverview = false
@@ -2948,6 +3001,7 @@ private fun PageOverviewDialog(
     currentPage: Int,
     bookmarks: Set<Int>,
     isNotebook: Boolean,
+    canManagePages: Boolean,
     onDismiss: () -> Unit,
     onSelectPage: (Int) -> Unit,
     onDuplicatePage: (Int) -> Unit,
@@ -2994,10 +3048,13 @@ private fun PageOverviewDialog(
                             style = MaterialTheme.typography.titleLarge
                         )
                         Text(
-                            if (isNotebook) {
-                                stringResource(R.string.page_overview_manage_hint)
-                            } else {
-                                stringResource(R.string.page_overview_hint)
+                            when {
+                                isNotebook ->
+                                    stringResource(R.string.page_overview_manage_hint)
+                                canManagePages ->
+                                    stringResource(R.string.page_overview_manage_pdf_hint)
+                                else ->
+                                    stringResource(R.string.page_overview_hint)
                             },
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             style = MaterialTheme.typography.bodySmall
@@ -3014,8 +3071,8 @@ private fun PageOverviewDialog(
                     modifier = Modifier
                         .weight(1f)
                         .fillMaxWidth()
-                        .pointerInput(isNotebook, session.pageCount) {
-                            if (!isNotebook) return@pointerInput
+                        .pointerInput(canManagePages, session.pageCount) {
+                            if (!canManagePages) return@pointerInput
                             detectDragGesturesAfterLongPress(
                                 onDragStart = { offset ->
                                     val slot = itemAt(offset.x, offset.y) ?: return@detectDragGesturesAfterLongPress
@@ -3075,7 +3132,7 @@ private fun PageOverviewDialog(
                                 onClick = { onSelectPage(page) }
                             )
 
-                            if (isNotebook) {
+                            if (canManagePages) {
                                 Box(Modifier.align(Alignment.TopEnd)) {
                                     Surface(
                                         shape = CircleShape,
@@ -3108,26 +3165,28 @@ private fun PageOverviewDialog(
                                                 onDuplicatePage(page)
                                             }
                                         )
-                                        listOf(
-                                            PageTemplate.BLANK to R.string.template_blank,
-                                            PageTemplate.RULED to R.string.template_ruled,
-                                            PageTemplate.GRID to R.string.template_grid,
-                                            PageTemplate.DOT to R.string.template_dot,
-                                        ).forEach { (template, label) ->
-                                            DropdownMenuItem(
-                                                text = {
-                                                    Text(
-                                                        stringResource(
-                                                            R.string.action_set_page_template,
-                                                            stringResource(label)
+                                        if (isNotebook) {
+                                            listOf(
+                                                PageTemplate.BLANK to R.string.template_blank,
+                                                PageTemplate.RULED to R.string.template_ruled,
+                                                PageTemplate.GRID to R.string.template_grid,
+                                                PageTemplate.DOT to R.string.template_dot,
+                                            ).forEach { (template, label) ->
+                                                DropdownMenuItem(
+                                                    text = {
+                                                        Text(
+                                                            stringResource(
+                                                                R.string.action_set_page_template,
+                                                                stringResource(label)
+                                                            )
                                                         )
-                                                    )
-                                                },
-                                                onClick = {
-                                                    menuExpanded = false
-                                                    onChangePageTemplate(page, template)
-                                                }
-                                            )
+                                                    },
+                                                    onClick = {
+                                                        menuExpanded = false
+                                                        onChangePageTemplate(page, template)
+                                                    }
+                                                )
+                                            }
                                         }
                                         if (session.pageCount > 1) {
                                             DropdownMenuItem(

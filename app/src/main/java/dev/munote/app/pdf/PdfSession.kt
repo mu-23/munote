@@ -22,21 +22,27 @@ class PdfSession private constructor(
     val fingerprint: String,
     private val descriptor: ParcelFileDescriptor,
     private val renderer: PdfRenderer,
+    pageOrder: List<Int>? = null,
 ) : AutoCloseable {
-    val pageCount: Int = renderer.pageCount
+    val sourcePageCount: Int = renderer.pageCount
+    private val logicalPageOrder: List<Int>? = pageOrder
+        ?.takeIf { it.isNotEmpty() && it.all { page -> page in 0 until sourcePageCount } }
+    val pageCount: Int = logicalPageOrder?.size ?: sourcePageCount
     private val lock = Mutex()
     private val cache = object : LruCache<String, Bitmap>(24 * 1024 * 1024) {
         override fun sizeOf(key: String, value: Bitmap): Int = value.allocationByteCount
     }
 
     suspend fun renderPage(index: Int, targetWidthPx: Int): Bitmap = withContext(Dispatchers.IO) {
+        require(index in 0 until pageCount) { "Page out of range" }
         val width = targetWidthPx.coerceIn(160, 2400)
-        val key = "${index}:${width}"
+        val sourceIndex = logicalPageOrder?.get(index) ?: index
+        val key = "${index}:${sourceIndex}:${width}"
         cache.get(key)?.takeIf { !it.isRecycled }?.let { return@withContext it }
 
         lock.withLock {
             cache.get(key)?.takeIf { !it.isRecycled }?.let { return@withLock it }
-            val page = renderer.openPage(index)
+            val page = renderer.openPage(sourceIndex)
             try {
                 val ratio = page.height.toFloat() / page.width.toFloat()
                 val height = (width * ratio).toInt().coerceAtLeast(1)
@@ -72,21 +78,26 @@ class PdfSession private constructor(
             val fingerprint = sha256(temp)
             val finalFile = File(docsDir, "${fingerprint}.pdf")
             if (finalFile.exists()) temp.delete() else temp.renameTo(finalFile)
-            openFile(finalFile, fingerprint)
+            openFile(finalFile, fingerprint, null)
         }
 
         suspend fun openStored(
             context: Context,
             fingerprint: String,
+            pageOrder: List<Int>? = null,
         ): PdfSession = withContext(Dispatchers.IO) {
             val file = File(File(context.filesDir, "documents"), "${fingerprint}.pdf")
             require(file.exists()) { context.getString(R.string.error_local_pdf_missing) }
-            openFile(file, fingerprint)
+            openFile(file, fingerprint, pageOrder)
         }
 
-        private fun openFile(file: File, fingerprint: String): PdfSession {
+        private fun openFile(
+            file: File,
+            fingerprint: String,
+            pageOrder: List<Int>?,
+        ): PdfSession {
             val pfd = ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)
-            return PdfSession(file, fingerprint, pfd, PdfRenderer(pfd))
+            return PdfSession(file, fingerprint, pfd, PdfRenderer(pfd), pageOrder)
         }
 
         private fun sha256(file: File): String {
