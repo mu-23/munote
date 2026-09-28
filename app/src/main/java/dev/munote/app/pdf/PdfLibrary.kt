@@ -40,6 +40,7 @@ data class LibraryEntry(
     val pageTemplate: PageTemplate = PageTemplate.BLANK,
     val notePageCount: Int = 0,
     val pageTemplates: List<PageTemplate> = emptyList(),
+    val pdfPageOrder: List<Int> = emptyList(),
     val favorite: Boolean = false,
     val folderId: String? = null,
     val trashedAt: Long? = null,
@@ -120,8 +121,11 @@ class PdfLibrary(private val context: Context) {
             ?: context.getString(R.string.default_pdf_note)
     }
 
-    suspend fun registerImported(fingerprint: String, title: String): LibraryEntry =
-        withContext(Dispatchers.IO) {
+    suspend fun registerImported(
+        fingerprint: String,
+        title: String,
+        pageCount: Int,
+    ): LibraryEntry = withContext(Dispatchers.IO) {
             val now = System.currentTimeMillis()
             val previous = synchronized(this@PdfLibrary) { entries[fingerprint] }
             val entry = LibraryEntry(
@@ -138,6 +142,9 @@ class PdfLibrary(private val context: Context) {
                 pageTemplate = previous?.pageTemplate ?: PageTemplate.BLANK,
                 notePageCount = previous?.notePageCount ?: 0,
                 pageTemplates = previous?.pageTemplates ?: emptyList(),
+                pdfPageOrder = previous?.pdfPageOrder
+                    ?.takeIf { it.isNotEmpty() }
+                    ?: (0 until pageCount.coerceAtLeast(0)).toList(),
                 favorite = previous?.favorite ?: false,
                 folderId = previous?.folderId,
                 trashedAt = previous?.trashedAt,
@@ -268,6 +275,107 @@ class PdfLibrary(private val context: Context) {
             }
             update(current.copy(trashedAt = null, lastOpenedAt = System.currentTimeMillis()))
         }
+
+    suspend fun deletePdfPage(
+        entry: LibraryEntry,
+        pageIndex: Int,
+        sourcePageCount: Int,
+    ): LibraryEntry = withContext(Dispatchers.IO) {
+        require(entry.kind == DocumentKind.PDF) { "Not an imported PDF" }
+        val current = synchronized(this@PdfLibrary) {
+            entries[entry.fingerprint] ?: entry
+        }
+        val order = effectivePdfPageOrder(current, sourcePageCount).toMutableList()
+        require(order.size > 1) { "A document must keep at least one page" }
+        require(pageIndex in order.indices) { "Page out of range" }
+
+        order.removeAt(pageIndex)
+        val bookmarks = current.bookmarks.mapNotNull { page ->
+            when {
+                page == pageIndex -> null
+                page > pageIndex -> page - 1
+                else -> page
+            }
+        }.toSet()
+        val lastPage = when {
+            current.lastPage > pageIndex -> current.lastPage - 1
+            current.lastPage == pageIndex -> pageIndex.coerceAtMost(order.lastIndex)
+            else -> current.lastPage
+        }
+
+        update(
+            current.copy(
+                pdfPageOrder = order,
+                bookmarks = bookmarks,
+                lastPage = lastPage.coerceIn(0, order.lastIndex),
+                lastOpenedAt = System.currentTimeMillis(),
+            )
+        )
+    }
+
+    suspend fun duplicatePdfPage(
+        entry: LibraryEntry,
+        pageIndex: Int,
+        sourcePageCount: Int,
+    ): LibraryEntry = withContext(Dispatchers.IO) {
+        require(entry.kind == DocumentKind.PDF) { "Not an imported PDF" }
+        val current = synchronized(this@PdfLibrary) {
+            entries[entry.fingerprint] ?: entry
+        }
+        val order = effectivePdfPageOrder(current, sourcePageCount).toMutableList()
+        require(pageIndex in order.indices) { "Page out of range" }
+
+        order.add(pageIndex + 1, order[pageIndex])
+        val bookmarks = current.bookmarks.map { page ->
+            if (page > pageIndex) page + 1 else page
+        }.toMutableSet()
+        if (pageIndex in current.bookmarks) bookmarks += pageIndex + 1
+
+        update(
+            current.copy(
+                pdfPageOrder = order,
+                bookmarks = bookmarks,
+                lastPage = pageIndex + 1,
+                lastOpenedAt = System.currentTimeMillis(),
+            )
+        )
+    }
+
+    suspend fun movePdfPage(
+        entry: LibraryEntry,
+        fromIndex: Int,
+        toIndex: Int,
+        sourcePageCount: Int,
+    ): LibraryEntry = withContext(Dispatchers.IO) {
+        require(entry.kind == DocumentKind.PDF) { "Not an imported PDF" }
+        val current = synchronized(this@PdfLibrary) {
+            entries[entry.fingerprint] ?: entry
+        }
+        val order = effectivePdfPageOrder(current, sourcePageCount).toMutableList()
+        require(fromIndex in order.indices && toIndex in order.indices) {
+            "Page out of range"
+        }
+        if (fromIndex == toIndex) return@withContext current
+
+        val moved = order.removeAt(fromIndex)
+        order.add(toIndex, moved)
+
+        fun remap(page: Int): Int = when {
+            page == fromIndex -> toIndex
+            fromIndex < toIndex && page in (fromIndex + 1)..toIndex -> page - 1
+            fromIndex > toIndex && page in toIndex until fromIndex -> page + 1
+            else -> page
+        }
+
+        update(
+            current.copy(
+                pdfPageOrder = order,
+                bookmarks = current.bookmarks.map(::remap).toSet(),
+                lastPage = remap(current.lastPage).coerceIn(0, order.lastIndex),
+                lastOpenedAt = System.currentTimeMillis(),
+            )
+        )
+    }
 
     suspend fun deleteNotebookPage(entry: LibraryEntry, pageIndex: Int): LibraryEntry =
         withContext(Dispatchers.IO) {
@@ -478,7 +586,15 @@ class PdfLibrary(private val context: Context) {
                 return@withContext it
             }
         }
-        renderFirstPdfPage(documentFile(entry.fingerprint), width)
+        renderFirstPdfPage(
+            file = documentFile(entry.fingerprint),
+            targetWidthPx = width,
+            pageIndex = if (entry.kind == DocumentKind.PDF) {
+                entry.pdfPageOrder.firstOrNull() ?: 0
+            } else {
+                0
+            },
+        )
     }
 
     suspend fun delete(entry: LibraryEntry): LibraryEntry = withContext(Dispatchers.IO) {
@@ -615,14 +731,33 @@ class PdfLibrary(private val context: Context) {
         }
     }
 
-    private fun renderFirstPdfPage(file: File, targetWidthPx: Int): Bitmap? {
+    private fun effectivePdfPageOrder(
+        entry: LibraryEntry,
+        sourcePageCount: Int,
+    ): List<Int> {
+        val explicit = entry.pdfPageOrder
+        if (
+            explicit.isNotEmpty() &&
+            explicit.all { it in 0 until sourcePageCount.coerceAtLeast(0) }
+        ) {
+            return explicit
+        }
+        return (0 until sourcePageCount.coerceAtLeast(0)).toList()
+    }
+
+    private fun renderFirstPdfPage(
+        file: File,
+        targetWidthPx: Int,
+        pageIndex: Int = 0,
+    ): Bitmap? {
         if (!file.exists()) return null
         val descriptor = ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)
         try {
             val renderer = PdfRenderer(descriptor)
             try {
                 if (renderer.pageCount <= 0) return null
-                val page = renderer.openPage(0)
+                val safePage = pageIndex.coerceIn(0, renderer.pageCount - 1)
+                val page = renderer.openPage(safePage)
                 try {
                     val ratio = page.height.toFloat() / page.width.toFloat()
                     val height = max(1, (targetWidthPx * ratio).toInt())

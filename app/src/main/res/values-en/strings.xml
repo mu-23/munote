@@ -222,4 +222,8 @@
     <string name="toast_sticker_saved">Saved to sticker library</string>
     <string name="error_sticker_save">Unable to save sticker</string>
 
+
+    <string name="page_overview_manage_pdf_hint">Long-press and drag pages to reorder them. Use the page menu to duplicate or delete pages. MuNote keeps this non-destructive; the original PDF file is not rewritten.</string>
+    <string name="error_page_update">Unable to update pages</string>
+
 </resources>
