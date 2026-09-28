@@ -8,7 +8,10 @@ import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.io.File
 
-enum class InkTool { PEN, HIGHLIGHTER, ERASER, LASSO, TEXT, IMAGE }
+enum class InkTool { PEN, HIGHLIGHTER, ERASER, LASSO, TEXT, IMAGE, SHAPE, RULER }
+
+@Serializable
+enum class InkShape { LINE, RECTANGLE, ELLIPSE, ARROW, TRIANGLE }
 
 @Serializable
 data class InkPoint(
@@ -23,7 +26,8 @@ data class InkStroke(
     val points: List<InkPoint>,
     val colorArgb: Int,
     val baseWidthDp: Float,
-    val highlighter: Boolean = false
+    val highlighter: Boolean = false,
+    val shape: InkShape? = null,
 )
 
 @Serializable

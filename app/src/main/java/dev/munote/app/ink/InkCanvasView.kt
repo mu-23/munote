@@ -10,11 +10,16 @@ import android.graphics.PointF
 import android.graphics.RectF
 import android.view.MotionEvent
 import android.view.View
+import kotlin.math.PI
 import kotlin.math.abs
+import kotlin.math.atan2
+import kotlin.math.cos
 import kotlin.math.hypot
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.pow
+import kotlin.math.round
+import kotlin.math.sin
 
 /**
  * Tablet-first stylus layer.
@@ -40,6 +45,7 @@ class InkCanvasView(context: Context) : View(context) {
     var penWidthDp: Float = 2.15f
     var highlighterWidthDp: Float = 12f
     var fingerWritingEnabled: Boolean = false
+    var shape: InkShape = InkShape.LINE
 
     var onStrokeCommitted: ((InkStroke) -> Unit)? = null
     var onPageMutated: ((List<InkStroke>) -> Unit)? = null
@@ -210,6 +216,11 @@ class InkCanvasView(context: Context) : View(context) {
                         startLassoGesture(event.x, event.y)
                     }
 
+                    InkTool.SHAPE, InkTool.RULER -> {
+                        eraserBefore = null
+                        startShapeGesture(event.x, event.y, event.eventTime)
+                    }
+
                     else -> {
                         eraserBefore = null
                         addPoint(event.x, event.y, event.pressure, event.eventTime, first = true)
@@ -230,6 +241,7 @@ class InkCanvasView(context: Context) : View(context) {
                     when (gestureTool) {
                         InkTool.ERASER -> eraseAt(x, y)
                         InkTool.LASSO -> moveLassoGesture(x, y)
+                        InkTool.SHAPE, InkTool.RULER -> updateShapeGesture(x, y, t)
                         else -> addPoint(x, y, p, t, first = false)
                     }
                 }
@@ -237,6 +249,8 @@ class InkCanvasView(context: Context) : View(context) {
                 when (gestureTool) {
                     InkTool.ERASER -> eraseAt(event.x, event.y)
                     InkTool.LASSO -> moveLassoGesture(event.x, event.y)
+                    InkTool.SHAPE, InkTool.RULER ->
+                        updateShapeGesture(event.x, event.y, event.eventTime)
                     else -> addPoint(
                         event.x,
                         event.y,
@@ -258,6 +272,25 @@ class InkCanvasView(context: Context) : View(context) {
                         }
 
                         InkTool.LASSO -> finishLassoGesture(event.x, event.y)
+
+                        InkTool.SHAPE, InkTool.RULER -> {
+                            updateShapeGesture(event.x, event.y, event.eventTime)
+                            if (active.size >= 2) {
+                                val stroke = InkStroke(
+                                    points = listOf(active.first(), active.last()),
+                                    colorArgb = inkColor,
+                                    baseWidthDp = penWidthDp,
+                                    highlighter = false,
+                                    shape = if (gestureTool == InkTool.RULER) {
+                                        InkShape.LINE
+                                    } else {
+                                        shape
+                                    },
+                                )
+                                committed.add(stroke)
+                                onStrokeCommitted?.invoke(stroke)
+                            }
+                        }
 
                         else -> {
                             if (active.isNotEmpty()) {
@@ -322,6 +355,63 @@ class InkCanvasView(context: Context) : View(context) {
 
     private fun currentBaseWidth(): Float =
         if (gestureTool == InkTool.HIGHLIGHTER) highlighterWidthDp else penWidthDp
+
+    private fun startShapeGesture(xRaw: Float, yRaw: Float, time: Long) {
+        if (width <= 0 || height <= 0) return
+        active.clear()
+        val start = InkPoint(
+            x = (xRaw / width).coerceIn(0f, 1f),
+            y = (yRaw / height).coerceIn(0f, 1f),
+            pressure = 1f,
+            timeMs = time,
+        )
+        active += start
+        active += start
+    }
+
+    private fun updateShapeGesture(xRaw: Float, yRaw: Float, time: Long) {
+        if (active.isEmpty() || width <= 0 || height <= 0) return
+        val start = active.first()
+        val end = if (gestureTool == InkTool.RULER) {
+            snapRulerEndpoint(start, xRaw, yRaw, time)
+        } else {
+            InkPoint(
+                x = (xRaw / width).coerceIn(0f, 1f),
+                y = (yRaw / height).coerceIn(0f, 1f),
+                pressure = 1f,
+                timeMs = time,
+            )
+        }
+        if (active.size == 1) active += end else active[active.lastIndex] = end
+    }
+
+    private fun snapRulerEndpoint(
+        start: InkPoint,
+        xRaw: Float,
+        yRaw: Float,
+        time: Long,
+    ): InkPoint {
+        val startX = start.x * width
+        val startY = start.y * height
+        val dx = xRaw - startX
+        val dy = yRaw - startY
+        val length = hypot(dx, dy)
+        if (length < 0.5f) {
+            return start.copy(timeMs = time)
+        }
+
+        val step = PI / 12.0
+        val angle = atan2(dy.toDouble(), dx.toDouble())
+        val snapped = round(angle / step) * step
+        val endX = startX + cos(snapped).toFloat() * length
+        val endY = startY + sin(snapped).toFloat() * length
+        return InkPoint(
+            x = (endX / width).coerceIn(0f, 1f),
+            y = (endY / height).coerceIn(0f, 1f),
+            pressure = 1f,
+            timeMs = time,
+        )
+    }
 
     private fun addPoint(
         xRaw: Float,
@@ -397,7 +487,8 @@ class InkCanvasView(context: Context) : View(context) {
         val ry = radiusPx / height
         val before = committed.size
         committed.removeAll { stroke ->
-            stroke.points.any { point ->
+            val probes = if (stroke.shape == null) stroke.points else shapeProbePoints(stroke)
+            probes.any { point ->
                 val dx = (point.x - nx) / rx
                 val dy = (point.y - ny) / ry
                 dx * dx + dy * dy <= 1f
@@ -406,6 +497,108 @@ class InkCanvasView(context: Context) : View(context) {
         if (before != committed.size) {
             eraserDirty = true
             clearSelection()
+        }
+    }
+
+    private fun shapeProbePoints(stroke: InkStroke): List<InkPoint> {
+        val start = stroke.points.firstOrNull() ?: return emptyList()
+        val end = stroke.points.lastOrNull() ?: return listOf(start)
+        val now = end.timeMs
+        fun point(x: Float, y: Float) = InkPoint(x, y, 1f, now)
+
+        return when (stroke.shape) {
+            InkShape.LINE -> List(17) { i ->
+                val t = i / 16f
+                point(
+                    start.x + (end.x - start.x) * t,
+                    start.y + (end.y - start.y) * t,
+                )
+            }
+
+            InkShape.RECTANGLE -> {
+                val left = min(start.x, end.x)
+                val right = max(start.x, end.x)
+                val top = min(start.y, end.y)
+                val bottom = max(start.y, end.y)
+                buildList {
+                    repeat(9) { i ->
+                        val t = i / 8f
+                        add(point(left + (right - left) * t, top))
+                        add(point(left + (right - left) * t, bottom))
+                        add(point(left, top + (bottom - top) * t))
+                        add(point(right, top + (bottom - top) * t))
+                    }
+                }
+            }
+
+            InkShape.ELLIPSE -> {
+                val cx = (start.x + end.x) * 0.5f
+                val cy = (start.y + end.y) * 0.5f
+                val rxShape = abs(end.x - start.x) * 0.5f
+                val ryShape = abs(end.y - start.y) * 0.5f
+                List(32) { i ->
+                    val angle = 2.0 * PI * i / 32.0
+                    point(
+                        cx + cos(angle).toFloat() * rxShape,
+                        cy + sin(angle).toFloat() * ryShape,
+                    )
+                }
+            }
+
+            InkShape.TRIANGLE -> {
+                val left = min(start.x, end.x)
+                val right = max(start.x, end.x)
+                val top = min(start.y, end.y)
+                val bottom = max(start.y, end.y)
+                val a = point((left + right) * 0.5f, top)
+                val b = point(right, bottom)
+                val c = point(left, bottom)
+                sampleSegments(listOf(a, b, c, a), 8)
+            }
+
+            InkShape.ARROW -> {
+                val base = sampleSegments(listOf(start, end), 16).toMutableList()
+                val dx = end.x - start.x
+                val dy = end.y - start.y
+                val len = hypot(dx, dy).coerceAtLeast(0.0001f)
+                val ux = dx / len
+                val uy = dy / len
+                val head = min(0.08f, len * 0.28f)
+                val wing = head * 0.55f
+                val left = point(
+                    end.x - ux * head - uy * wing,
+                    end.y - uy * head + ux * wing,
+                )
+                val right = point(
+                    end.x - ux * head + uy * wing,
+                    end.y - uy * head - ux * wing,
+                )
+                base += sampleSegments(listOf(left, end, right), 8)
+                base
+            }
+
+            null -> stroke.points
+        }
+    }
+
+    private fun sampleSegments(points: List<InkPoint>, steps: Int): List<InkPoint> {
+        if (points.size < 2) return points
+        return buildList {
+            for (i in 0 until points.lastIndex) {
+                val a = points[i]
+                val b = points[i + 1]
+                repeat(steps + 1) { stepIndex ->
+                    val t = stepIndex / steps.toFloat()
+                    add(
+                        InkPoint(
+                            x = a.x + (b.x - a.x) * t,
+                            y = a.y + (b.y - a.y) * t,
+                            pressure = 1f,
+                            timeMs = b.timeMs,
+                        )
+                    )
+                }
+            }
         }
     }
 
@@ -593,6 +786,11 @@ class InkCanvasView(context: Context) : View(context) {
                     colorArgb = inkColor,
                     baseWidthDp = currentBaseWidth(),
                     highlighter = gestureTool == InkTool.HIGHLIGHTER,
+                    shape = when (gestureTool) {
+                        InkTool.RULER -> InkShape.LINE
+                        InkTool.SHAPE -> shape
+                        else -> null
+                    },
                 )
             )
         }
@@ -632,6 +830,11 @@ class InkCanvasView(context: Context) : View(context) {
         paint.strokeJoin = Paint.Join.ROUND
         paint.style = Paint.Style.STROKE
         paint.pathEffect = null
+
+        if (stroke.shape != null && pts.size >= 2) {
+            drawShape(canvas, stroke)
+            return
+        }
 
         if (pts.size == 1) {
             paint.style = Paint.Style.FILL
@@ -680,6 +883,71 @@ class InkCanvasView(context: Context) : View(context) {
         val beforeLast = pts[pts.lastIndex - 1]
         paint.strokeWidth = widthFor(stroke, beforeLast, last, speedBetween(beforeLast, last))
         canvas.drawLine(fromX, fromY, last.x * width, last.y * height, paint)
+    }
+
+    private fun drawShape(canvas: Canvas, stroke: InkStroke) {
+        val start = stroke.points.firstOrNull() ?: return
+        val end = stroke.points.lastOrNull() ?: return
+        val x1 = start.x * width
+        val y1 = start.y * height
+        val x2 = end.x * width
+        val y2 = end.y * height
+        paint.strokeWidth = (stroke.baseWidthDp * density).coerceAtLeast(1f)
+
+        when (stroke.shape) {
+            InkShape.LINE -> canvas.drawLine(x1, y1, x2, y2, paint)
+
+            InkShape.RECTANGLE -> canvas.drawRect(
+                min(x1, x2),
+                min(y1, y2),
+                max(x1, x2),
+                max(y1, y2),
+                paint,
+            )
+
+            InkShape.ELLIPSE -> canvas.drawOval(
+                RectF(
+                    min(x1, x2),
+                    min(y1, y2),
+                    max(x1, x2),
+                    max(y1, y2),
+                ),
+                paint,
+            )
+
+            InkShape.TRIANGLE -> {
+                val left = min(x1, x2)
+                val right = max(x1, x2)
+                val top = min(y1, y2)
+                val bottom = max(y1, y2)
+                path.reset()
+                path.moveTo((left + right) * 0.5f, top)
+                path.lineTo(right, bottom)
+                path.lineTo(left, bottom)
+                path.close()
+                canvas.drawPath(path, paint)
+            }
+
+            InkShape.ARROW -> {
+                canvas.drawLine(x1, y1, x2, y2, paint)
+                val dx = x2 - x1
+                val dy = y2 - y1
+                val length = hypot(dx, dy)
+                if (length > 1f) {
+                    val angle = atan2(dy.toDouble(), dx.toDouble())
+                    val head = min(28f * density, length * 0.32f)
+                    val wingAngle = PI / 7.0
+                    val leftX = x2 - cos(angle - wingAngle).toFloat() * head
+                    val leftY = y2 - sin(angle - wingAngle).toFloat() * head
+                    val rightX = x2 - cos(angle + wingAngle).toFloat() * head
+                    val rightY = y2 - sin(angle + wingAngle).toFloat() * head
+                    canvas.drawLine(x2, y2, leftX, leftY, paint)
+                    canvas.drawLine(x2, y2, rightX, rightY, paint)
+                }
+            }
+
+            null -> Unit
+        }
     }
 
     private fun speedBetween(a: InkPoint, b: InkPoint): Float {
