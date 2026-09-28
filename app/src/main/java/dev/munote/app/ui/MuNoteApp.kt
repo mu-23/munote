@@ -53,6 +53,8 @@ import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Redo
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.StarBorder
 import androidx.compose.material.icons.filled.Undo
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
@@ -279,6 +281,14 @@ fun MuNoteApp(initialPdf: Uri?) {
             ocrDone = ocrDone,
             ocrRunning = ocrRunning,
             ocrRevision = ocrRevision,
+            bookmarks = currentEntry?.bookmarks ?: emptySet(),
+            onToggleBookmark = { page ->
+                currentEntry?.let { entry ->
+                    scope.launch {
+                        currentEntry = library.toggleBookmark(entry, page)
+                    }
+                }
+            },
             onPageChanged = { page ->
                 currentEntry?.let { entry ->
                     scope.launch {
@@ -555,6 +565,8 @@ private fun ReaderScreen(
     ocrDone: Int,
     ocrRunning: Boolean,
     ocrRevision: Int,
+    bookmarks: Set<Int>,
+    onToggleBookmark: (Int) -> Unit,
     onPageChanged: (Int) -> Unit,
     onClose: () -> Unit,
     onOpenPdf: () -> Unit,
