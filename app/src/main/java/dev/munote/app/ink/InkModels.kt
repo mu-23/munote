@@ -8,7 +8,7 @@ import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.io.File
 
-enum class InkTool { PEN, HIGHLIGHTER, ERASER }
+enum class InkTool { PEN, HIGHLIGHTER, ERASER, LASSO }
 
 @Serializable
 data class InkPoint(
