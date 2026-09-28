@@ -186,4 +186,20 @@
     <string name="eraser_pixel">Partial eraser</string>
     <string name="eraser_clear_page">Clear page</string>
 
+
+    <string name="navigation_title">Outline · Links</string>
+    <string name="navigation_current_page">Current page %1$d / %2$d</string>
+    <string name="action_add">Add</string>
+    <string name="action_add_outline">Add outline entry</string>
+    <string name="action_add_link">Add page link</string>
+    <string name="dialog_add_link_title">Add page link</string>
+    <string name="link_label">Link label</string>
+    <string name="link_target_page">Target page</string>
+    <string name="dialog_add_outline_title">Add outline entry</string>
+    <string name="outline_title_label">Section title</string>
+    <string name="outline_section">Outline / chapters</string>
+    <string name="outline_empty">No outline entries yet</string>
+    <string name="page_links_section">Links on this page</string>
+    <string name="page_links_empty">No page links here yet</string>
+
 </resources>
