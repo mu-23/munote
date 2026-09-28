@@ -9,6 +9,10 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.calculatePan
+import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -70,8 +74,14 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.PointerType
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import dev.munote.app.ink.InkCanvasView
@@ -84,6 +94,8 @@ import dev.munote.app.pdf.PdfSession
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlin.math.abs
+import kotlin.math.roundToInt
 
 @Composable
 fun MuNoteApp(initialPdf: Uri?) {
@@ -356,7 +368,8 @@ private fun ReaderScreen(
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxHeight(),
-                beyondViewportPageCount = 1
+                beyondViewportPageCount = 1,
+                userScrollEnabled = false
             ) { page ->
                 PdfInkPage(
                     session = session,
@@ -367,6 +380,13 @@ private fun ReaderScreen(
                     inkColor = if (tool == InkTool.HIGHLIGHTER) highlighterColor else penColor,
                     penWidthDp = penWidth,
                     highlighterWidthDp = highlighterWidth,
+                    onPageSwipe = { direction ->
+                        scope.launch {
+                            pager.animateScrollToPage(
+                                (pager.currentPage + direction).coerceIn(0, session.pageCount - 1)
+                            )
+                        }
+                    },
                     onStroke = { stroke ->
                         scope.launch {
                             inkStore.append(page, stroke)
@@ -734,6 +754,7 @@ private fun PdfInkPage(
     inkColor: Int,
     penWidthDp: Float,
     highlighterWidthDp: Float,
+    onPageSwipe: (Int) -> Unit,
     onStroke: (dev.munote.app.ink.InkStroke) -> Unit,
     onMutated: (List<dev.munote.app.ink.InkStroke>) -> Unit,
 ) {
@@ -742,6 +763,9 @@ private fun PdfInkPage(
             session.renderPage(pageIndex, 1800)
         }
     }
+
+    var scale by remember(pageIndex) { mutableStateOf(1f) }
+    var pan by remember(pageIndex) { mutableStateOf(Offset.Zero) }
 
     BoxWithConstraints(
         Modifier
@@ -755,16 +779,116 @@ private fun PdfInkPage(
             return@BoxWithConstraints
         }
 
+        val density = LocalDensity.current
         val pageRatio = bmp.width.toFloat() / bmp.height.toFloat()
         val containerRatio = maxWidth.value / maxHeight.value
-        val pageModifier = if (containerRatio <= pageRatio) {
-            Modifier.fillMaxWidth().aspectRatio(pageRatio)
+        val pageWidthPx: Float
+        val pageHeightPx: Float
+        val pageModifier: Modifier
+
+        if (containerRatio <= pageRatio) {
+            pageWidthPx = with(density) { maxWidth.toPx() }
+            pageHeightPx = pageWidthPx / pageRatio
+            pageModifier = Modifier.fillMaxWidth().aspectRatio(pageRatio)
         } else {
-            Modifier.fillMaxHeight().aspectRatio(pageRatio)
+            pageHeightPx = with(density) { maxHeight.toPx() }
+            pageWidthPx = pageHeightPx * pageRatio
+            pageModifier = Modifier.fillMaxHeight().aspectRatio(pageRatio)
+        }
+
+        fun clampPan(candidate: Offset, zoom: Float): Offset {
+            if (zoom <= 1.001f) return Offset.Zero
+            val maxX = (pageWidthPx * (zoom - 1f) / 2f).coerceAtLeast(0f)
+            val maxY = (pageHeightPx * (zoom - 1f) / 2f).coerceAtLeast(0f)
+            return Offset(
+                candidate.x.coerceIn(-maxX, maxX),
+                candidate.y.coerceIn(-maxY, maxY)
+            )
+        }
+
+        fun applyTransform(zoomChange: Float, panChange: Offset) {
+            val nextScale = (scale * zoomChange).coerceIn(1f, 4f)
+            if (nextScale <= 1.01f) {
+                scale = 1f
+                pan = Offset.Zero
+            } else {
+                scale = nextScale
+                pan = clampPan(pan + panChange, nextScale)
+            }
+        }
+
+        val gestureModifier = Modifier.pointerInput(pageIndex) {
+            awaitEachGesture {
+                awaitPointerEventScope {
+                    val first = awaitFirstDown(requireUnconsumed = false)
+
+                    // Stylus/eraser input is owned by InkCanvasView. This recognizer is finger-only.
+                    if (first.type != PointerType.Touch) {
+                        var pressed = true
+                        while (pressed) {
+                            val event = awaitPointerEvent(PointerEventPass.Final)
+                            pressed = event.changes.any { it.pressed }
+                        }
+                        return@awaitPointerEventScope
+                    }
+
+                    var pinched = false
+                    var dragX = 0f
+                    var dragY = 0f
+                    var pressed = true
+
+                    while (pressed) {
+                        val event = awaitPointerEvent(PointerEventPass.Main)
+                        val down = event.changes.filter { it.pressed }
+                        pressed = down.isNotEmpty()
+                        if (!pressed) break
+
+                        if (down.size >= 2) {
+                            pinched = true
+                            val zoomChange = event.calculateZoom()
+                            val panChange = event.calculatePan()
+                            applyTransform(zoomChange, panChange)
+                            event.changes.forEach { it.consume() }
+                        } else if (down.size == 1) {
+                            val change = down.first()
+                            val delta = change.positionChange()
+
+                            if (pinched || scale > 1.01f) {
+                                applyTransform(1f, delta)
+                            } else {
+                                dragX += delta.x
+                                dragY += delta.y
+                            }
+                            change.consume()
+                        }
+                    }
+
+                    if (!pinched && scale <= 1.01f) {
+                        val thresholdPx = with(density) { 72.dp.toPx() }
+                        if (abs(dragX) >= thresholdPx && abs(dragX) > abs(dragY) * 1.15f) {
+                            onPageSwipe(if (dragX < 0f) 1 else -1)
+                        }
+                    }
+
+                    if (scale <= 1.01f) {
+                        scale = 1f
+                        pan = Offset.Zero
+                    } else {
+                        pan = clampPan(pan, scale)
+                    }
+                }
+            }
         }
 
         Surface(
-            modifier = pageModifier,
+            modifier = pageModifier
+                .then(gestureModifier)
+                .graphicsLayer {
+                    scaleX = scale
+                    scaleY = scale
+                    translationX = pan.x
+                    translationY = pan.y
+                },
             shadowElevation = 3.dp,
             shape = RoundedCornerShape(4.dp),
             color = Color.White
@@ -826,6 +950,27 @@ private fun PdfInkPage(
                         if (view.snapshot() != strokes) view.setStrokes(strokes)
                     },
                     modifier = Modifier.fillMaxSize()
+                )
+            }
+        }
+
+        if (scale > 1.01f) {
+            Surface(
+                onClick = {
+                    scale = 1f
+                    pan = Offset.Zero
+                },
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(8.dp),
+                shape = CircleShape,
+                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.94f),
+                tonalElevation = 2.dp
+            ) {
+                Text(
+                    "${(scale * 100).roundToInt()}% · 适合页面",
+                    modifier = Modifier.padding(horizontal = 11.dp, vertical = 7.dp),
+                    style = MaterialTheme.typography.labelMedium
                 )
             }
         }
