@@ -111,15 +111,18 @@ fun MuNoteApp(initialPdf: Uri?) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val library = remember { PdfLibrary(context) }
+    val handwritingRecognizer = remember { ChineseHandwritingRecognizer() }
 
     var session by remember { mutableStateOf<PdfSession?>(null) }
     var currentEntry by remember { mutableStateOf<LibraryEntry?>(null) }
     var indexStore by remember { mutableStateOf<OcrIndexStore?>(null) }
+    var handwritingIndexStore by remember { mutableStateOf<HandwritingIndexStore?>(null) }
     var inkStore by remember { mutableStateOf<InkStore?>(null) }
     var loadError by remember { mutableStateOf<String?>(null) }
     var ocrDone by remember { mutableIntStateOf(0) }
     var ocrRunning by remember { mutableStateOf(false) }
     var ocrRevision by remember { mutableIntStateOf(0) }
+    var handwritingModelState by remember { mutableStateOf(HandwritingModelState.NOT_READY) }
     var libraryRevision by remember { mutableIntStateOf(0) }
 
     fun attachSession(next: PdfSession, entry: LibraryEntry) {
@@ -127,6 +130,7 @@ fun MuNoteApp(initialPdf: Uri?) {
         session = next
         currentEntry = entry
         indexStore = OcrIndexStore(context, next.fingerprint)
+        handwritingIndexStore = HandwritingIndexStore(context, next.fingerprint)
         inkStore = InkStore(context, next.fingerprint)
         ocrDone = indexStore?.completedPages() ?: 0
         ocrRevision++
@@ -166,6 +170,7 @@ fun MuNoteApp(initialPdf: Uri?) {
         session = null
         currentEntry = null
         indexStore = null
+        handwritingIndexStore = null
         inkStore = null
         ocrDone = 0
         ocrRunning = false
@@ -184,7 +189,23 @@ fun MuNoteApp(initialPdf: Uri?) {
     }
 
     DisposableEffect(Unit) {
-        onDispose { session?.close() }
+        onDispose {
+            session?.close()
+            handwritingRecognizer.close()
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        handwritingModelState = if (handwritingRecognizer.isReady()) {
+            HandwritingModelState.READY
+        } else {
+            HandwritingModelState.DOWNLOADING
+            if (handwritingRecognizer.ensureReady()) {
+                HandwritingModelState.READY
+            } else {
+                HandwritingModelState.ERROR
+            }
+        }
     }
 
     BackHandler(enabled = session != null) {
@@ -226,6 +247,9 @@ fun MuNoteApp(initialPdf: Uri?) {
             documentTitle = currentEntry?.title ?: "PDF 笔记",
             session = session!!,
             indexStore = indexStore!!,
+            handwritingIndexStore = handwritingIndexStore!!,
+            handwritingRecognizer = handwritingRecognizer,
+            handwritingModelState = handwritingModelState,
             inkStore = inkStore!!,
             ocrDone = ocrDone,
             ocrRunning = ocrRunning,
