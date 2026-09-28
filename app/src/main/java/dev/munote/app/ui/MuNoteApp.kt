@@ -51,6 +51,7 @@ import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.Gesture
 import androidx.compose.material.icons.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Redo
@@ -98,9 +99,12 @@ import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import dev.munote.app.AppLanguage
+import dev.munote.app.R
 import dev.munote.app.ink.InkCanvasView
 import dev.munote.app.ink.InkStore
 import dev.munote.app.ink.InkTool
@@ -128,7 +132,7 @@ fun MuNoteApp(initialPdf: Uri?) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val library = remember { PdfLibrary(context) }
-    val handwritingRecognizer = remember { ChineseHandwritingRecognizer() }
+    val handwritingRecognizer = remember { ChineseHandwritingRecognizer(context) }
 
     var session by remember { mutableStateOf<PdfSession?>(null) }
     var currentEntry by remember { mutableStateOf<LibraryEntry?>(null) }
@@ -163,7 +167,7 @@ fun MuNoteApp(initialPdf: Uri?) {
                 val entry = library.registerImported(next.fingerprint, title)
                 attachSession(next, entry)
             }.onFailure {
-                loadError = it.message ?: "PDF 打开失败"
+                loadError = it.message ?: context.getString(R.string.error_pdf_open)
             }
         }
     }
@@ -176,7 +180,7 @@ fun MuNoteApp(initialPdf: Uri?) {
                 val touched = library.touch(entry)
                 attachSession(next, touched)
             }.onFailure {
-                loadError = it.message ?: "本地 PDF 打开失败"
+                loadError = it.message ?: context.getString(R.string.error_local_pdf_open)
                 libraryRevision++
             }
         }
@@ -278,20 +282,20 @@ fun MuNoteApp(initialPdf: Uri?) {
                 scope.launch {
                     runCatching { library.rename(entry, title) }
                         .onSuccess { libraryRevision++ }
-                        .onFailure { loadError = it.message ?: "重命名失败" }
+                        .onFailure { loadError = it.message ?: context.getString(R.string.error_rename) }
                 }
             },
             onDelete = { entry ->
                 scope.launch {
                     runCatching { library.delete(entry) }
                         .onSuccess { libraryRevision++ }
-                        .onFailure { loadError = it.message ?: "删除失败" }
+                        .onFailure { loadError = it.message ?: context.getString(R.string.error_delete) }
                 }
             },
         )
     } else {
         ReaderScreen(
-            documentTitle = currentEntry?.title ?: "PDF 笔记",
+            documentTitle = currentEntry?.title ?: context.getString(R.string.default_pdf_note),
             initialPage = currentEntry?.lastPage ?: 0,
             session = session!!,
             indexStore = indexStore!!,
