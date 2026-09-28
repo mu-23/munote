@@ -210,4 +210,5 @@
     <string name="split_same_document">Current document · open another view</string>
     <string name="split_pdf_document">PDF document</string>
 
+    <string name="action_open">Open</string>
 </resources>

@@ -210,4 +210,5 @@
     <string name="split_same_document">当前文档 · 可用于同文档双开</string>
     <string name="split_pdf_document">PDF 文档</string>
 
+    <string name="action_open">打开</string>
 </resources>
