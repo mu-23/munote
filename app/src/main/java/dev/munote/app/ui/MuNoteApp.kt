@@ -298,7 +298,65 @@ private fun LibraryHome(
     error: String?,
     onImport: () -> Unit,
     onOpen: (LibraryEntry) -> Unit,
+    onRename: (LibraryEntry, String) -> Unit,
+    onDelete: (LibraryEntry) -> Unit,
 ) {
+    var renameTarget by remember { mutableStateOf<LibraryEntry?>(null) }
+    var renameText by remember { mutableStateOf("") }
+    var deleteTarget by remember { mutableStateOf<LibraryEntry?>(null) }
+
+    renameTarget?.let { entry ->
+        AlertDialog(
+            onDismissRequest = { renameTarget = null },
+            title = { Text("重命名") },
+            text = {
+                OutlinedTextField(
+                    value = renameText,
+                    onValueChange = { renameText = it },
+                    singleLine = true,
+                    label = { Text("文档名称") }
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = renameText.trim().isNotEmpty(),
+                    onClick = {
+                        onRename(entry, renameText)
+                        renameTarget = null
+                    }
+                ) {
+                    Text("保存")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { renameTarget = null }) { Text("取消") }
+            }
+        )
+    }
+
+    deleteTarget?.let { entry ->
+        AlertDialog(
+            onDismissRequest = { deleteTarget = null },
+            title = { Text("删除这个文档？") },
+            text = {
+                Text("会删除 MuNote 本地保存的 PDF、手写笔迹和识别索引。原来文件管理器里的源 PDF 不受影响。")
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        onDelete(entry)
+                        deleteTarget = null
+                    }
+                ) {
+                    Text("删除", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { deleteTarget = null }) { Text("取消") }
+            }
+        )
+    }
+
     Column(
         Modifier
             .fillMaxSize()
@@ -315,7 +373,7 @@ private fun LibraryHome(
                 Column(Modifier.weight(1f)) {
                     Text("MuNote", style = MaterialTheme.typography.headlineSmall)
                     Text(
-                        "手写优先 · 扫描 PDF 可搜索",
+                        "手写优先 · PDF OCR · 手写可搜索",
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         style = MaterialTheme.typography.bodySmall
                     )
@@ -367,7 +425,7 @@ private fun LibraryHome(
                         }
                         Text("把教材或扫描 PDF 放进来")
                         Text(
-                            "首次导入后会保存在本机资料库，之后直接打开，不用重复选文件。",
+                            "首次导入后会保存在本机资料库，之后直接打开，并记住上次阅读位置。",
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             style = MaterialTheme.typography.bodySmall
                         )
@@ -391,9 +449,15 @@ private fun LibraryHome(
                     count = entries.size,
                     key = { entries[it].fingerprint }
                 ) { index ->
+                    val entry = entries[index]
                     LibraryDocumentRow(
-                        entry = entries[index],
-                        onClick = { onOpen(entries[index]) }
+                        entry = entry,
+                        onClick = { onOpen(entry) },
+                        onRename = {
+                            renameText = entry.title
+                            renameTarget = entry
+                        },
+                        onDelete = { deleteTarget = entry },
                     )
                 }
             }
@@ -405,7 +469,11 @@ private fun LibraryHome(
 private fun LibraryDocumentRow(
     entry: LibraryEntry,
     onClick: () -> Unit,
+    onRename: () -> Unit,
+    onDelete: () -> Unit,
 ) {
+    var menuExpanded by remember { mutableStateOf(false) }
+
     Surface(
         onClick = onClick,
         modifier = Modifier.fillMaxWidth(),
@@ -413,7 +481,7 @@ private fun LibraryDocumentRow(
         tonalElevation = 1.dp
     ) {
         Row(
-            Modifier.padding(horizontal = 18.dp, vertical = 16.dp),
+            Modifier.padding(horizontal = 18.dp, vertical = 14.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(14.dp)
         ) {
@@ -434,12 +502,41 @@ private fun LibraryDocumentRow(
                     style = MaterialTheme.typography.titleSmall
                 )
                 Text(
-                    "本地文档 · 打开后自动继续 OCR",
+                    if (entry.lastPage > 0) {
+                        "上次看到第 ${entry.lastPage + 1} 页 · 本地保存"
+                    } else {
+                        "本地保存 · 打开后自动继续 OCR"
+                    },
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     style = MaterialTheme.typography.bodySmall
                 )
             }
-            Icon(Icons.Default.ArrowForward, contentDescription = null)
+            Box {
+                IconButton(onClick = { menuExpanded = true }) {
+                    Icon(Icons.Default.MoreVert, contentDescription = "文档菜单")
+                }
+                DropdownMenu(
+                    expanded = menuExpanded,
+                    onDismissRequest = { menuExpanded = false }
+                ) {
+                    DropdownMenuItem(
+                        text = { Text("重命名") },
+                        leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null) },
+                        onClick = {
+                            menuExpanded = false
+                            onRename()
+                        }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("删除") },
+                        leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null) },
+                        onClick = {
+                            menuExpanded = false
+                            onDelete()
+                        }
+                    )
+                }
+            }
         }
     }
 }
