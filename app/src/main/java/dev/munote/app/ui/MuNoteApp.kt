@@ -585,6 +585,9 @@ private fun ReaderScreen(
     var inkRevision by remember { mutableIntStateOf(0) }
     var handwritingRevision by remember { mutableIntStateOf(0) }
     var showThumbnails by remember { mutableStateOf(false) }
+    var showBookmarksOnly by remember { mutableStateOf(false) }
+    var showPageJump by remember { mutableStateOf(false) }
+    var pageJumpText by remember { mutableStateOf("") }
     var showPenOptions by remember { mutableStateOf(false) }
     var exportRunning by remember { mutableStateOf(false) }
 
@@ -658,6 +661,39 @@ private fun ReaderScreen(
         onPageChanged(pager.currentPage)
     }
 
+    if (showPageJump) {
+        AlertDialog(
+            onDismissRequest = { showPageJump = false },
+            title = { Text("跳转到页面") },
+            text = {
+                OutlinedTextField(
+                    value = pageJumpText,
+                    onValueChange = { value ->
+                        pageJumpText = value.filter { it.isDigit() }.take(6)
+                    },
+                    singleLine = true,
+                    label = { Text("页码 1-${session.pageCount}") }
+                )
+            },
+            confirmButton = {
+                val target = pageJumpText.toIntOrNull()
+                TextButton(
+                    enabled = target != null && target in 1..session.pageCount,
+                    onClick = {
+                        val page = (pageJumpText.toIntOrNull() ?: 1) - 1
+                        scope.launch { pager.animateScrollToPage(page) }
+                        showPageJump = false
+                    }
+                ) {
+                    Text("跳转")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showPageJump = false }) { Text("取消") }
+            }
+        )
+    }
+
     Column(
         Modifier
             .fillMaxSize()
@@ -701,6 +737,21 @@ private fun ReaderScreen(
                     }
                     IconButton(onClick = { showThumbnails = !showThumbnails }) {
                         Icon(Icons.Default.List, contentDescription = "页面缩略图")
+                    }
+                    if (showThumbnails) {
+                        IconButton(
+                            enabled = bookmarks.isNotEmpty(),
+                            onClick = { showBookmarksOnly = !showBookmarksOnly }
+                        ) {
+                            Icon(
+                                if (showBookmarksOnly) Icons.Default.Star else Icons.Default.StarBorder,
+                                contentDescription = if (showBookmarksOnly) {
+                                    "显示全部页面"
+                                } else {
+                                    "只看书签页"
+                                }
+                            )
+                        }
                     }
                     IconButton(onClick = { onToggleBookmark(pager.currentPage) }) {
                         Icon(
@@ -814,6 +865,7 @@ private fun ReaderScreen(
                     session = session,
                     currentPage = pager.currentPage,
                     bookmarks = bookmarks,
+                    showBookmarksOnly = showBookmarksOnly,
                     onPageClick = { page ->
                         scope.launch { pager.animateScrollToPage(page) }
                     }
@@ -965,11 +1017,20 @@ private fun ReaderScreen(
                 ) {
                     Icon(Icons.Default.ArrowBack, contentDescription = "上一页")
                 }
-                Text(
-                    "${pager.currentPage + 1} / ${session.pageCount}",
-                    modifier = Modifier.padding(horizontal = 8.dp),
-                    style = MaterialTheme.typography.labelLarge
-                )
+                Surface(
+                    onClick = {
+                        pageJumpText = (pager.currentPage + 1).toString()
+                        showPageJump = true
+                    },
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.surfaceVariant
+                ) {
+                    Text(
+                        "${pager.currentPage + 1} / ${session.pageCount}",
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                        style = MaterialTheme.typography.labelLarge
+                    )
+                }
                 IconButton(
                     onClick = {
                         scope.launch {
@@ -991,13 +1052,19 @@ private fun ThumbnailRail(
     session: PdfSession,
     currentPage: Int,
     bookmarks: Set<Int>,
+    showBookmarksOnly: Boolean,
     onPageClick: (Int) -> Unit,
 ) {
     val listState = rememberLazyListState()
+    val visiblePages = remember(session.pageCount, bookmarks, showBookmarksOnly) {
+        if (showBookmarksOnly) bookmarks.sorted()
+        else (0 until session.pageCount).toList()
+    }
 
-    LaunchedEffect(currentPage) {
+    LaunchedEffect(currentPage, showBookmarksOnly, visiblePages) {
         if (!listState.isScrollInProgress) {
-            listState.animateScrollToItem(currentPage)
+            val target = visiblePages.indexOf(currentPage)
+            if (target >= 0) listState.animateScrollToItem(target)
         }
     }
 
@@ -1015,9 +1082,10 @@ private fun ThumbnailRail(
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             items(
-                count = session.pageCount,
-                key = { it }
-            ) { page ->
+                count = visiblePages.size,
+                key = { visiblePages[it] }
+            ) { index ->
+                val page = visiblePages[index]
                 ThumbnailCard(
                     session = session,
                     pageIndex = page,
