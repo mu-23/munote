@@ -332,12 +332,20 @@ class InkCanvasView(context: Context) : View(context) {
     ) {
         if (width <= 0 || height <= 0) return
 
+        val inputPressure = if (activeInputWasFinger) {
+            // Finger MotionEvent pressure is highly device-specific and is often pinned near 1.0.
+            // Use a stable virtual pressure so touch-writing does not become an extra-thick marker.
+            0.52f
+        } else {
+            pressureRaw.coerceIn(0.03f, 1f)
+        }
+
         if (first) {
             sx = xRaw
             sy = yRaw
             rawX = xRaw
             rawY = yRaw
-            smoothPressure = pressureRaw.coerceIn(0.03f, 1f)
+            smoothPressure = inputPressure
             smoothSpeedPxMs = 0f
             lastInputTime = time
         } else {
@@ -347,12 +355,17 @@ class InkCanvasView(context: Context) : View(context) {
 
             // Slow movement gets stronger stabilization; fast strokes get lower latency.
             val speedRatio = (smoothSpeedPxMs / (1.9f * density)).coerceIn(0f, 1f)
-            val positionAlpha = 0.42f + speedRatio * 0.36f
+            val positionAlpha = if (activeInputWasFinger) {
+                // A fingertip is wider/noisier than a stylus tip, so apply a little more
+                // stabilization at low speed while still letting fast strokes catch up.
+                0.34f + speedRatio * 0.32f
+            } else {
+                0.42f + speedRatio * 0.36f
+            }
             sx += (xRaw - sx) * positionAlpha
             sy += (yRaw - sy) * positionAlpha
 
-            val p = pressureRaw.coerceIn(0.03f, 1f)
-            smoothPressure += (p - smoothPressure) * 0.38f
+            smoothPressure += (inputPressure - smoothPressure) * 0.38f
 
             rawX = xRaw
             rawY = yRaw
