@@ -46,6 +46,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.ArrowForward
 import androidx.compose.material.icons.filled.Brush
@@ -134,7 +135,9 @@ import dev.munote.app.ocr.ChineseOcrEngine
 import dev.munote.app.ocr.OcrIndexStore
 import dev.munote.app.ocr.SearchHit
 import dev.munote.app.ocr.SearchSource
+import dev.munote.app.pdf.DocumentKind
 import dev.munote.app.pdf.LibraryEntry
+import dev.munote.app.pdf.PageTemplate
 import dev.munote.app.pdf.PdfExporter
 import dev.munote.app.pdf.PdfLibrary
 import dev.munote.app.pdf.PdfSession
@@ -273,6 +276,11 @@ fun MuNoteApp(initialPdf: Uri?) {
     }
 
     LaunchedEffect(session?.fingerprint) {
+        if (currentEntry?.kind == DocumentKind.NOTE) {
+            ocrRunning = false
+            ocrDone = 0
+            return@LaunchedEffect
+        }
         val pdf = session ?: return@LaunchedEffect
         val store = indexStore ?: return@LaunchedEffect
         val anchor = (currentEntry?.lastPage ?: 0)
@@ -317,6 +325,19 @@ fun MuNoteApp(initialPdf: Uri?) {
             entries = remember(libraryRevision) { library.entries() },
             error = loadError,
             onImport = { picker.launch(arrayOf("application/pdf")) },
+            onCreateNote = { title, template ->
+                scope.launch {
+                    loadError = null
+                    runCatching {
+                        val entry = library.createNotebook(title, template)
+                        val next = PdfSession.openStored(context, entry.fingerprint)
+                        attachSession(next, entry)
+                    }.onFailure {
+                        loadError = it.message ?: context.getString(R.string.error_notebook_save)
+                        libraryRevision++
+                    }
+                }
+            },
             onOpen = ::openStored,
             onRename = { entry, title ->
                 scope.launch {
@@ -346,7 +367,11 @@ fun MuNoteApp(initialPdf: Uri?) {
         )
     } else {
         ReaderScreen(
-            documentTitle = currentEntry?.title ?: context.getString(R.string.default_pdf_note),
+            documentTitle = currentEntry?.title ?: if (currentEntry?.kind == DocumentKind.NOTE) {
+                context.getString(R.string.default_notebook_title)
+            } else {
+                context.getString(R.string.default_pdf_note)
+            },
             initialPage = currentEntry?.lastPage ?: 0,
             session = session!!,
             indexStore = indexStore!!,
@@ -359,6 +384,26 @@ fun MuNoteApp(initialPdf: Uri?) {
             ocrRunning = ocrRunning,
             ocrRevision = ocrRevision,
             bookmarks = currentEntry?.bookmarks ?: emptySet(),
+            isNotebook = currentEntry?.kind == DocumentKind.NOTE,
+            onAddPage = {
+                currentEntry?.takeIf { it.kind == DocumentKind.NOTE }?.let { entry ->
+                    scope.launch {
+                        loadError = null
+                        runCatching {
+                            session?.close()
+                            session = null
+                            val appended = library.appendNotebookPage(entry)
+                            val lastPage = appended.notePageCount.coerceAtLeast(1) - 1
+                            val updated = library.updateLastPage(appended, lastPage)
+                            val next = PdfSession.openStored(context, updated.fingerprint)
+                            attachSession(next, updated)
+                        }.onFailure {
+                            loadError = it.message ?: context.getString(R.string.error_notebook_save)
+                            libraryRevision++
+                        }
+                    }
+                }
+            },
             onToggleBookmark = { page ->
                 currentEntry?.let { entry ->
                     scope.launch {
@@ -431,6 +476,7 @@ private fun LibraryHome(
     entries: List<LibraryEntry>,
     error: String?,
     onImport: () -> Unit,
+    onCreateNote: (String, PageTemplate) -> Unit,
     onOpen: (LibraryEntry) -> Unit,
     onRename: (LibraryEntry, String) -> Unit,
     onDelete: (LibraryEntry) -> Unit,
@@ -440,6 +486,70 @@ private fun LibraryHome(
     var renameTarget by remember { mutableStateOf<LibraryEntry?>(null) }
     var renameText by remember { mutableStateOf("") }
     var deleteTarget by remember { mutableStateOf<LibraryEntry?>(null) }
+    var showNewNotebook by remember { mutableStateOf(false) }
+    var newNotebookTitle by remember { mutableStateOf("") }
+    var newNotebookTemplate by remember { mutableStateOf(PageTemplate.BLANK) }
+
+    if (showNewNotebook) {
+        AlertDialog(
+            onDismissRequest = { showNewNotebook = false },
+            title = { Text(stringResource(R.string.dialog_new_notebook_title)) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    OutlinedTextField(
+                        value = newNotebookTitle,
+                        onValueChange = { newNotebookTitle = it },
+                        singleLine = true,
+                        label = { Text(stringResource(R.string.label_notebook_name)) }
+                    )
+                    Text(
+                        stringResource(R.string.label_page_template),
+                        style = MaterialTheme.typography.labelLarge
+                    )
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        listOf(
+                            PageTemplate.BLANK to R.string.template_blank,
+                            PageTemplate.RULED to R.string.template_ruled,
+                            PageTemplate.GRID to R.string.template_grid,
+                            PageTemplate.DOT to R.string.template_dot,
+                        ).forEach { (template, labelRes) ->
+                            AssistChip(
+                                onClick = { newNotebookTemplate = template },
+                                label = {
+                                    Text(
+                                        (if (newNotebookTemplate == template) "✓ " else "") +
+                                            stringResource(labelRes)
+                                    )
+                                }
+                            )
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        onCreateNote(newNotebookTitle, newNotebookTemplate)
+                        newNotebookTitle = ""
+                        newNotebookTemplate = PageTemplate.BLANK
+                        showNewNotebook = false
+                    }
+                ) {
+                    Text(stringResource(R.string.action_create))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showNewNotebook = false }) {
+                    Text(stringResource(R.string.action_cancel))
+                }
+            }
+        )
+    }
 
     renameTarget?.let { entry ->
         AlertDialog(
@@ -521,6 +631,23 @@ private fun LibraryHome(
                 }
                 LanguageMenu()
                 Surface(
+                    onClick = { showNewNotebook = true },
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.primaryContainer
+                ) {
+                    Row(
+                        Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Icon(Icons.Default.Add, contentDescription = null)
+                        Text(
+                            stringResource(R.string.action_new_notebook),
+                            style = MaterialTheme.typography.labelLarge
+                        )
+                    }
+                }
+                                Surface(
                     onClick = onImport,
                     shape = CircleShape,
                     color = MaterialTheme.colorScheme.primaryContainer
@@ -565,11 +692,25 @@ private fun LibraryHome(
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
-                        FilledTonalIconButton(onClick = onImport, modifier = Modifier.size(58.dp)) {
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            FilledTonalIconButton(
+                                onClick = { showNewNotebook = true },
+                                modifier = Modifier.size(58.dp)
+                            ) {
+                                Icon(
+                                    Icons.Default.Add,
+                                    contentDescription = stringResource(R.string.action_new_notebook)
+                                )
+                            }
+                                                    FilledTonalIconButton(onClick = onImport, modifier = Modifier.size(58.dp)) {
                             Icon(
                                 Icons.Default.FolderOpen,
                                 contentDescription = stringResource(R.string.action_import_pdf)
                             )
+                        }
                         }
                         Text(stringResource(R.string.home_empty_title))
                         Text(
@@ -743,10 +884,16 @@ private fun LibraryDocumentCard(
             style = MaterialTheme.typography.titleSmall
         )
         Text(
-            if (entry.lastPage > 0) {
-                stringResource(R.string.last_viewed_page, entry.lastPage + 1)
-            } else {
-                stringResource(R.string.local_saved_auto_ocr)
+            when {
+                entry.kind == DocumentKind.NOTE ->
+                    stringResource(
+                        R.string.native_notebook_pages,
+                        entry.notePageCount.coerceAtLeast(1)
+                    )
+                entry.lastPage > 0 ->
+                    stringResource(R.string.last_viewed_page, entry.lastPage + 1)
+                else ->
+                    stringResource(R.string.local_saved_auto_ocr)
             },
             modifier = Modifier.padding(start = 2.dp, top = 2.dp),
             maxLines = 1,
@@ -773,6 +920,8 @@ private fun ReaderScreen(
     ocrRunning: Boolean,
     ocrRevision: Int,
     bookmarks: Set<Int>,
+    isNotebook: Boolean,
+    onAddPage: () -> Unit,
     onToggleBookmark: (Int) -> Unit,
     onPageChanged: (Int) -> Unit,
     onClose: () -> Unit,
@@ -1423,6 +1572,15 @@ private fun ReaderScreen(
                     }
                 ) {
                     Icon(Icons.Default.ArrowForward, contentDescription = stringResource(R.string.cd_next_page))
+                }
+                if (isNotebook) {
+                    Spacer(Modifier.width(6.dp))
+                    IconButton(onClick = onAddPage) {
+                        Icon(
+                            Icons.Default.Add,
+                            contentDescription = stringResource(R.string.cd_add_page)
+                        )
+                    }
                 }
             }
         }
