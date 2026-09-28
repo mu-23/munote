@@ -6,6 +6,7 @@ import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.pdf.PdfDocument
 import android.net.Uri
+import dev.munote.app.R
 import dev.munote.app.ink.InkPoint
 import dev.munote.app.ink.InkStore
 import dev.munote.app.ink.InkStroke
@@ -61,7 +62,7 @@ object PdfExporter {
 
             currentCoroutineContext().ensureActive()
             context.contentResolver.openOutputStream(destination, "w").use { output ->
-                requireNotNull(output) { "无法创建导出文件" }
+                requireNotNull(output) { context.getString(R.string.error_output_create) }
                 document.writeTo(output)
             }
             session.pageCount
