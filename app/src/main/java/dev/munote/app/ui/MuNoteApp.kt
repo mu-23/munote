@@ -328,6 +328,51 @@ fun MuNoteApp(initialPdf: Uri?) {
 }
 
 @Composable
+private fun LanguageMenu() {
+    val context = LocalContext.current
+    var expanded by remember { mutableStateOf(false) }
+    val current = AppLanguage.current(context)
+
+    Box {
+        IconButton(onClick = { expanded = true }) {
+            Icon(
+                Icons.Default.Language,
+                contentDescription = stringResource(R.string.language)
+            )
+        }
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false }
+        ) {
+            DropdownMenuItem(
+                text = {
+                    Text(
+                        (if (current == AppLanguage.CHINESE) "✓ " else "") +
+                            stringResource(R.string.language_chinese)
+                    )
+                },
+                onClick = {
+                    expanded = false
+                    AppLanguage.set(context, AppLanguage.CHINESE)
+                }
+            )
+            DropdownMenuItem(
+                text = {
+                    Text(
+                        (if (current == AppLanguage.ENGLISH) "✓ " else "") +
+                            stringResource(R.string.language_english)
+                    )
+                },
+                onClick = {
+                    expanded = false
+                    AppLanguage.set(context, AppLanguage.ENGLISH)
+                }
+            )
+        }
+    }
+}
+
+@Composable
 private fun LibraryHome(
     entries: List<LibraryEntry>,
     error: String?,
@@ -413,6 +458,7 @@ private fun LibraryHome(
                         style = MaterialTheme.typography.bodySmall
                     )
                 }
+                LanguageMenu()
                 Surface(
                     onClick = onImport,
                     shape = CircleShape,
@@ -762,6 +808,7 @@ private fun ReaderScreen(
                         overflow = TextOverflow.Ellipsis,
                         style = MaterialTheme.typography.labelLarge
                     )
+                    LanguageMenu()
                     IconButton(onClick = onOpenPdf) {
                         Icon(Icons.Default.FolderOpen, contentDescription = stringResource(R.string.cd_import_another_pdf))
                     }
