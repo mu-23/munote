@@ -14,6 +14,11 @@ enum class InkTool { PEN, HIGHLIGHTER, ERASER, LASSO, TEXT, IMAGE, SHAPE, RULER 
 enum class InkShape { LINE, RECTANGLE, ELLIPSE, ARROW, TRIANGLE }
 
 @Serializable
+enum class InkBrush { FOUNTAIN, BALLPOINT, PENCIL }
+
+enum class EraserMode { STROKE, PIXEL }
+
+@Serializable
 data class InkPoint(
     val x: Float,
     val y: Float,
@@ -28,6 +33,7 @@ data class InkStroke(
     val baseWidthDp: Float,
     val highlighter: Boolean = false,
     val shape: InkShape? = null,
+    val brush: InkBrush = InkBrush.FOUNTAIN,
 )
 
 @Serializable

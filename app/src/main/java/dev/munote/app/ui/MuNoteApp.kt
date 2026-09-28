@@ -138,6 +138,8 @@ import dev.munote.app.backup.LocalBackupInfo
 import dev.munote.app.backup.LocalBackupManager
 import dev.munote.app.image.ImageStore
 import dev.munote.app.image.PageImageNote
+import dev.munote.app.ink.EraserMode
+import dev.munote.app.ink.InkBrush
 import dev.munote.app.ink.InkCanvasView
 import dev.munote.app.ink.InkShape
 import dev.munote.app.ink.InkStore
@@ -1569,11 +1571,74 @@ private fun ReaderScreen(
         }
     }
 
-    var penColor by remember { mutableIntStateOf(0xFF1C1D1F.toInt()) }
-    var highlighterColor by remember { mutableIntStateOf(0xFFFFD54F.toInt()) }
-    var penWidth by remember { mutableStateOf(2.15f) }
-    var highlighterWidth by remember { mutableStateOf(12f) }
+    var penColor by remember {
+        mutableIntStateOf(inputPrefs.getInt("pen_color", 0xFF1C1D1F.toInt()))
+    }
+    var highlighterColor by remember {
+        mutableIntStateOf(inputPrefs.getInt("highlighter_color", 0xFFFFD54F.toInt()))
+    }
+    var penWidth by remember {
+        mutableStateOf(inputPrefs.getFloat("pen_width", 2.15f))
+    }
+    var highlighterWidth by remember {
+        mutableStateOf(inputPrefs.getFloat("highlighter_width", 12f))
+    }
+    var brush by remember {
+        mutableStateOf(
+            runCatching {
+                InkBrush.valueOf(
+                    inputPrefs.getString("pen_brush", InkBrush.FOUNTAIN.name)
+                        ?: InkBrush.FOUNTAIN.name
+                )
+            }.getOrDefault(InkBrush.FOUNTAIN)
+        )
+    }
+    var eraserMode by remember {
+        mutableStateOf(
+            runCatching {
+                EraserMode.valueOf(
+                    inputPrefs.getString("eraser_mode", EraserMode.STROKE.name)
+                        ?: EraserMode.STROKE.name
+                )
+            }.getOrDefault(EraserMode.STROKE)
+        )
+    }
+    var eraserSize by remember {
+        mutableStateOf(inputPrefs.getFloat("eraser_size", 18f))
+    }
+    val favoritePenColors = remember {
+        mutableStateListOf<Int>().apply {
+            inputPrefs.getString("favorite_pen_colors", "")
+                .orEmpty()
+                .split(",")
+                .mapNotNull { it.toIntOrNull() }
+                .distinct()
+                .forEach(::add)
+        }
+    }
+    val favoritePenWidths = remember {
+        mutableStateListOf<Float>().apply {
+            inputPrefs.getString("favorite_pen_widths", "")
+                .orEmpty()
+                .split(",")
+                .mapNotNull { it.toFloatOrNull() }
+                .distinct()
+                .forEach(::add)
+        }
+    }
     var selectedShape by remember { mutableStateOf(InkShape.LINE) }
+
+    fun persistColorFavorites() {
+        inputPrefs.edit()
+            .putString("favorite_pen_colors", favoritePenColors.joinToString(","))
+            .apply()
+    }
+
+    fun persistWidthFavorites() {
+        inputPrefs.edit()
+            .putString("favorite_pen_widths", favoritePenWidths.joinToString(","))
+            .apply()
+    }
 
     suspend fun jumpToPage(page: Int, rememberLocation: Boolean = true) {
         val target = page.coerceIn(0, session.pageCount - 1)
@@ -1932,6 +1997,9 @@ private fun ReaderScreen(
                     penWidthDp = penWidth,
                     highlighterWidthDp = highlighterWidth,
                     shape = selectedShape,
+                    brush = brush,
+                    eraserMode = eraserMode,
+                    eraserSizeDp = eraserSize,
                     fingerWritingEnabled = fingerWriting,
                     onShowPageOverview = ::openPageOverview,
                     onAddTextBox = { x, y ->
@@ -2034,6 +2102,27 @@ private fun ReaderScreen(
             }
         }
 
+        if (tool == InkTool.ERASER) {
+            EraserOptionsBar(
+                mode = eraserMode,
+                sizeDp = eraserSize,
+                onMode = {
+                    eraserMode = it
+                    inputPrefs.edit().putString("eraser_mode", it.name).apply()
+                },
+                onSize = {
+                    eraserSize = it
+                    inputPrefs.edit().putFloat("eraser_size", it).apply()
+                },
+                onClearPage = {
+                    scope.launch {
+                        inkStore.replacePage(pager.currentPage, emptyList())
+                        inkRevision++
+                    }
+                },
+            )
+        }
+
         if (showPenOptions && (tool == InkTool.PEN || tool == InkTool.HIGHLIGHTER)) {
             PenOptionsBar(
                 tool = tool,
@@ -2041,10 +2130,40 @@ private fun ReaderScreen(
                 highlighterColor = highlighterColor,
                 penWidth = penWidth,
                 highlighterWidth = highlighterWidth,
-                onPenColor = { penColor = it },
-                onHighlighterColor = { highlighterColor = it },
-                onPenWidth = { penWidth = it },
-                onHighlighterWidth = { highlighterWidth = it },
+                brush = brush,
+                favoritePenColors = favoritePenColors,
+                favoritePenWidths = favoritePenWidths,
+                onBrush = {
+                    brush = it
+                    inputPrefs.edit().putString("pen_brush", it.name).apply()
+                },
+                onPenColor = {
+                    penColor = it
+                    inputPrefs.edit().putInt("pen_color", it).apply()
+                },
+                onHighlighterColor = {
+                    highlighterColor = it
+                    inputPrefs.edit().putInt("highlighter_color", it).apply()
+                },
+                onPenWidth = {
+                    penWidth = it
+                    inputPrefs.edit().putFloat("pen_width", it).apply()
+                },
+                onHighlighterWidth = {
+                    highlighterWidth = it
+                    inputPrefs.edit().putFloat("highlighter_width", it).apply()
+                },
+                onToggleColorFavorite = {
+                    if (!favoritePenColors.remove(penColor)) favoritePenColors += penColor
+                    while (favoritePenColors.size > 8) favoritePenColors.removeAt(0)
+                    persistColorFavorites()
+                },
+                onToggleWidthFavorite = {
+                    val existing = favoritePenWidths.indexOfFirst { kotlin.math.abs(it - penWidth) < 0.001f }
+                    if (existing >= 0) favoritePenWidths.removeAt(existing) else favoritePenWidths += penWidth
+                    while (favoritePenWidths.size > 6) favoritePenWidths.removeAt(0)
+                    persistWidthFavorites()
+                },
             )
         }
 
@@ -2603,15 +2722,30 @@ private fun PenOptionsBar(
     highlighterColor: Int,
     penWidth: Float,
     highlighterWidth: Float,
+    brush: InkBrush,
+    favoritePenColors: List<Int>,
+    favoritePenWidths: List<Float>,
+    onBrush: (InkBrush) -> Unit,
     onPenColor: (Int) -> Unit,
     onHighlighterColor: (Int) -> Unit,
     onPenWidth: (Float) -> Unit,
     onHighlighterWidth: (Float) -> Unit,
+    onToggleColorFavorite: () -> Unit,
+    onToggleWidthFavorite: () -> Unit,
 ) {
     val isHighlighter = tool == InkTool.HIGHLIGHTER
     val currentWidth = if (isHighlighter) highlighterWidth else penWidth
-    val widths = if (isHighlighter) listOf(8f, 12f, 16f) else listOf(1.4f, 2.15f, 3.0f)
-    val colors = if (isHighlighter) {
+    val defaultWidths = if (isHighlighter) {
+        listOf(8f, 12f, 16f)
+    } else {
+        listOf(1.0f, 1.4f, 2.15f, 3.0f, 4.0f)
+    }
+    val widths = if (isHighlighter) {
+        defaultWidths
+    } else {
+        (favoritePenWidths + defaultWidths).distinct().take(10)
+    }
+    val defaultColors = if (isHighlighter) {
         listOf(
             0xFFFFD54F.toInt(),
             0xFF80DEEA.toInt(),
@@ -2626,7 +2760,15 @@ private fun PenOptionsBar(
             0xFFC93C3C.toInt(),
             0xFF26805A.toInt(),
             0xFF7E57C2.toInt(),
+            0xFF7A4E2D.toInt(),
+            0xFF616161.toInt(),
+            0xFFE67E22.toInt(),
         )
+    }
+    val colors = if (isHighlighter) {
+        defaultColors
+    } else {
+        (favoritePenColors + defaultColors).distinct().take(16)
     }
     val currentColor = if (isHighlighter) highlighterColor else penColor
 
@@ -2650,6 +2792,26 @@ private fun PenOptionsBar(
                 },
                 style = MaterialTheme.typography.labelLarge
             )
+
+            if (!isHighlighter) {
+                listOf(
+                    InkBrush.FOUNTAIN to R.string.brush_fountain,
+                    InkBrush.BALLPOINT to R.string.brush_ballpoint,
+                    InkBrush.PENCIL to R.string.brush_pencil,
+                ).forEach { (candidate, label) ->
+                    AssistChip(
+                        onClick = { onBrush(candidate) },
+                        label = {
+                            Text(
+                                (if (brush == candidate) "✓ " else "") +
+                                    stringResource(label)
+                            )
+                        }
+                    )
+                }
+                Spacer(Modifier.width(4.dp))
+            }
+
             widths.forEach { width ->
                 AssistChip(
                     onClick = {
@@ -2657,14 +2819,34 @@ private fun PenOptionsBar(
                     },
                     label = {
                         Text(
-                            if (isHighlighter) "${width.toInt()}" else String.format("%.1f", width)
+                            if (isHighlighter) {
+                                "${width.toInt()}"
+                            } else {
+                                String.format("%.2g", width)
+                            }
                         )
                     },
-                    leadingIcon = if (currentWidth == width) {
+                    leadingIcon = if (kotlin.math.abs(currentWidth - width) < 0.001f) {
                         { Text("●") }
                     } else null
                 )
             }
+
+            if (!isHighlighter) {
+                IconButton(onClick = onToggleWidthFavorite) {
+                    Icon(
+                        if (favoritePenWidths.any {
+                                kotlin.math.abs(it - currentWidth) < 0.001f
+                            }) {
+                            Icons.Default.Star
+                        } else {
+                            Icons.Default.StarBorder
+                        },
+                        contentDescription = stringResource(R.string.favorite_current_width)
+                    )
+                }
+            }
+
             Spacer(Modifier.width(5.dp))
             colors.forEach { color ->
                 ColorSwatch(
@@ -2674,6 +2856,77 @@ private fun PenOptionsBar(
                         if (isHighlighter) onHighlighterColor(color) else onPenColor(color)
                     }
                 )
+            }
+
+            if (!isHighlighter) {
+                IconButton(onClick = onToggleColorFavorite) {
+                    Icon(
+                        if (currentColor in favoritePenColors) {
+                            Icons.Default.Star
+                        } else {
+                            Icons.Default.StarBorder
+                        },
+                        contentDescription = stringResource(R.string.favorite_current_color)
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun EraserOptionsBar(
+    mode: EraserMode,
+    sizeDp: Float,
+    onMode: (EraserMode) -> Unit,
+    onSize: (Float) -> Unit,
+    onClearPage: () -> Unit,
+) {
+    Surface(
+        tonalElevation = 2.dp,
+        color = MaterialTheme.colorScheme.surface
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState())
+                .padding(horizontal = 16.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Text(
+                stringResource(R.string.eraser_options),
+                style = MaterialTheme.typography.labelLarge
+            )
+            AssistChip(
+                onClick = { onMode(EraserMode.STROKE) },
+                label = {
+                    Text(
+                        (if (mode == EraserMode.STROKE) "✓ " else "") +
+                            stringResource(R.string.eraser_stroke)
+                    )
+                }
+            )
+            AssistChip(
+                onClick = { onMode(EraserMode.PIXEL) },
+                label = {
+                    Text(
+                        (if (mode == EraserMode.PIXEL) "✓ " else "") +
+                            stringResource(R.string.eraser_pixel)
+                    )
+                }
+            )
+            listOf(10f, 18f, 30f, 46f).forEach { size ->
+                AssistChip(
+                    onClick = { onSize(size) },
+                    label = { Text("${size.toInt()}") },
+                    leadingIcon = if (kotlin.math.abs(sizeDp - size) < 0.001f) {
+                        { Text("●") }
+                    } else null
+                )
+            }
+            TextButton(onClick = onClearPage) {
+                Text(stringResource(R.string.eraser_clear_page))
             }
         }
     }
@@ -3286,6 +3539,9 @@ private fun PdfInkPage(
     penWidthDp: Float,
     highlighterWidthDp: Float,
     shape: InkShape,
+    brush: InkBrush,
+    eraserMode: EraserMode,
+    eraserSizeDp: Float,
     fingerWritingEnabled: Boolean,
     onShowPageOverview: () -> Unit,
     onAddTextBox: (Float, Float) -> Unit,
@@ -3553,6 +3809,9 @@ private fun PdfInkPage(
                             this.penWidthDp = penWidthDp
                             this.highlighterWidthDp = highlighterWidthDp
                             this.shape = shape
+                            this.brush = brush
+                            this.eraserMode = eraserMode
+                            this.eraserSizeDp = eraserSizeDp
                             this.fingerWritingEnabled = fingerWritingEnabled
                             setStrokes(strokes)
                             onStrokeCommitted = onStroke
@@ -3567,6 +3826,9 @@ private fun PdfInkPage(
                         view.penWidthDp = penWidthDp
                         view.highlighterWidthDp = highlighterWidthDp
                         view.shape = shape
+                        view.brush = brush
+                        view.eraserMode = eraserMode
+                        view.eraserSizeDp = eraserSizeDp
                         view.fingerWritingEnabled = fingerWritingEnabled
                         view.onStrokeCommitted = onStroke
                         view.onPageMutated = onMutated

@@ -10,6 +10,7 @@ import android.net.Uri
 import dev.munote.app.R
 import dev.munote.app.image.ImageStore
 import dev.munote.app.image.PageImageNote
+import dev.munote.app.ink.InkBrush
 import dev.munote.app.ink.InkPoint
 import dev.munote.app.ink.InkShape
 import dev.munote.app.ink.InkStore
@@ -163,7 +164,11 @@ private object InkPdfRenderer {
         if (points.isEmpty()) return
 
         paint.color = stroke.colorArgb
-        paint.alpha = if (stroke.highlighter) 82 else 255
+        paint.alpha = when {
+            stroke.highlighter -> 82
+            stroke.brush == InkBrush.PENCIL -> 175
+            else -> 255
+        }
         paint.style = Paint.Style.STROKE
         paint.strokeCap = Paint.Cap.ROUND
         paint.strokeJoin = Paint.Join.ROUND
@@ -353,12 +358,25 @@ private object InkPdfRenderer {
         }
 
         val pressure = ((a.pressure + b.pressure) * 0.5f).coerceIn(0.03f, 1f)
-        val pressureCurve = pressure.toDouble().pow(0.58).toFloat()
-        val speedReference = (3.0f * scale).coerceAtLeast(0.1f)
-        val velocityThin = (speedPxMs / speedReference).coerceIn(0f, 0.24f)
-        val factor = (0.48f + 0.90f * pressureCurve) * (1f - velocityThin)
-        return (stroke.baseWidthDp * scale * factor)
-            .coerceIn(0.7f * scale, 4.2f * scale)
+        return when (stroke.brush) {
+            InkBrush.BALLPOINT ->
+                (stroke.baseWidthDp * scale).coerceAtLeast(0.65f * scale)
+
+            InkBrush.PENCIL -> {
+                val factor = 0.58f + pressure * 0.34f
+                (stroke.baseWidthDp * scale * factor)
+                    .coerceIn(0.55f * scale, 3.6f * scale)
+            }
+
+            InkBrush.FOUNTAIN -> {
+                val pressureCurve = pressure.toDouble().pow(0.58).toFloat()
+                val speedReference = (3.0f * scale).coerceAtLeast(0.1f)
+                val velocityThin = (speedPxMs / speedReference).coerceIn(0f, 0.24f)
+                val factor = (0.48f + 0.90f * pressureCurve) * (1f - velocityThin)
+                (stroke.baseWidthDp * scale * factor)
+                    .coerceIn(0.7f * scale, 4.2f * scale)
+            }
+        }
     }
 }
 

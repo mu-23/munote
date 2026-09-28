@@ -175,4 +175,15 @@
     <string name="shape_triangle">Triangle</string>
     <string name="ruler_hint">Ruler mode: drag to draw a straight line. The angle snaps to common 15° increments.</string>
 
+
+    <string name="brush_fountain">Fountain pen</string>
+    <string name="brush_ballpoint">Ballpoint</string>
+    <string name="brush_pencil">Pencil</string>
+    <string name="favorite_current_color">Favorite current color</string>
+    <string name="favorite_current_width">Favorite current width</string>
+    <string name="eraser_options">Eraser</string>
+    <string name="eraser_stroke">Stroke eraser</string>
+    <string name="eraser_pixel">Partial eraser</string>
+    <string name="eraser_clear_page">Clear page</string>
+
 </resources>

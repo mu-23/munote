@@ -175,4 +175,15 @@
     <string name="shape_triangle">三角形</string>
     <string name="ruler_hint">直尺模式：拖动即可画直线，并自动吸附到每 15° 的常用角度。</string>
 
+
+    <string name="brush_fountain">钢笔</string>
+    <string name="brush_ballpoint">圆珠笔</string>
+    <string name="brush_pencil">铅笔</string>
+    <string name="favorite_current_color">收藏当前颜色</string>
+    <string name="favorite_current_width">收藏当前粗细</string>
+    <string name="eraser_options">橡皮</string>
+    <string name="eraser_stroke">笔画橡皮</string>
+    <string name="eraser_pixel">局部橡皮</string>
+    <string name="eraser_clear_page">清空本页</string>
+
 </resources>
