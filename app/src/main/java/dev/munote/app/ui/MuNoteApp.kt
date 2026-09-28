@@ -61,7 +61,13 @@ import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.Gesture
 import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.Image as ImageIcon
 import androidx.compose.material.icons.filled.KeyboardArrowLeft
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.LockOpen
+import androidx.compose.material.icons.filled.Crop
+import androidx.compose.material.icons.filled.RotateLeft
+import androidx.compose.material.icons.filled.RotateRight
 import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.List
@@ -86,6 +92,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -129,6 +136,8 @@ import dev.munote.app.AppLanguage
 import dev.munote.app.R
 import dev.munote.app.backup.LocalBackupInfo
 import dev.munote.app.backup.LocalBackupManager
+import dev.munote.app.image.ImageStore
+import dev.munote.app.image.PageImageNote
 import dev.munote.app.ink.InkCanvasView
 import dev.munote.app.ink.InkStore
 import dev.munote.app.ink.InkTool
@@ -170,6 +179,7 @@ fun MuNoteApp(initialPdf: Uri?) {
     var handwritingIndexStore by remember { mutableStateOf<HandwritingIndexStore?>(null) }
     var inkStore by remember { mutableStateOf<InkStore?>(null) }
     var textStore by remember { mutableStateOf<TextStore?>(null) }
+    var imageStore by remember { mutableStateOf<ImageStore?>(null) }
     var loadError by remember { mutableStateOf<String?>(null) }
     var ocrDone by remember { mutableIntStateOf(0) }
     var ocrRunning by remember { mutableStateOf(false) }
@@ -187,6 +197,7 @@ fun MuNoteApp(initialPdf: Uri?) {
         handwritingIndexStore = HandwritingIndexStore(context, next.fingerprint)
         inkStore = InkStore(context, next.fingerprint)
         textStore = TextStore(context, next.fingerprint)
+        imageStore = ImageStore(context, next.fingerprint)
         ocrDone = indexStore?.completedPages() ?: 0
         ocrRevision++
         libraryRevision++
@@ -228,6 +239,7 @@ fun MuNoteApp(initialPdf: Uri?) {
         handwritingIndexStore = null
         inkStore = null
         textStore = null
+        imageStore = null
         ocrDone = 0
         ocrRunning = false
         ocrRevision++
@@ -458,6 +470,7 @@ fun MuNoteApp(initialPdf: Uri?) {
             handwritingModelState = handwritingModelState,
             inkStore = inkStore!!,
             textStore = textStore!!,
+            imageStore = imageStore!!,
             ocrDone = ocrDone,
             ocrRunning = ocrRunning,
             ocrRevision = ocrRevision,
@@ -490,6 +503,7 @@ fun MuNoteApp(initialPdf: Uri?) {
                             val updated = library.deleteNotebookPage(entry, page)
                             inkStore?.deletePage(page)
                             textStore?.deletePage(page)
+                            imageStore?.deletePage(page)
                             handwritingIndexStore?.deletePage(page)
                             session?.close()
                             session = null
@@ -509,6 +523,7 @@ fun MuNoteApp(initialPdf: Uri?) {
                             val updated = library.duplicateNotebookPage(entry, page)
                             inkStore?.duplicatePage(page)
                             textStore?.duplicatePage(page)
+                            imageStore?.duplicatePage(page)
                             handwritingIndexStore?.duplicatePage(page)
                             session?.close()
                             session = null
@@ -528,6 +543,7 @@ fun MuNoteApp(initialPdf: Uri?) {
                             val updated = library.moveNotebookPage(entry, from, to)
                             inkStore?.movePage(from, to)
                             textStore?.movePage(from, to)
+                            imageStore?.movePage(from, to)
                             handwritingIndexStore?.movePage(from, to)
                             session?.close()
                             session = null
@@ -1440,6 +1456,7 @@ private fun ReaderScreen(
     handwritingModelState: HandwritingModelState,
     inkStore: InkStore,
     textStore: TextStore,
+    imageStore: ImageStore,
     ocrDone: Int,
     ocrRunning: Boolean,
     ocrRevision: Int,
@@ -1469,7 +1486,9 @@ private fun ReaderScreen(
     var inkRevision by remember { mutableIntStateOf(0) }
     var handwritingRevision by remember { mutableIntStateOf(0) }
     var textRevision by remember { mutableIntStateOf(0) }
+    var imageRevision by remember { mutableIntStateOf(0) }
     var activeTextBoxId by remember { mutableStateOf<String?>(null) }
+    var activeImageId by remember { mutableStateOf<String?>(null) }
     var activeInkView by remember { mutableStateOf<InkCanvasView?>(null) }
     var lassoSelectionActive by remember { mutableStateOf(false) }
     var showThumbnails by remember { mutableStateOf(false) }
@@ -1486,6 +1505,28 @@ private fun ReaderScreen(
     var exportTotal by remember { mutableIntStateOf(0) }
     var exportJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
 
+    val imagePicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null) {
+            scope.launch {
+                runCatching {
+                    imageStore.add(pager.currentPage, uri)
+                }.onSuccess { image ->
+                    activeImageId = image.id
+                    imageRevision++
+                    tool = InkTool.IMAGE
+                }.onFailure { error ->
+                    Toast.makeText(
+                        context,
+                        error.message ?: context.getString(R.string.error_image_insert),
+                        Toast.LENGTH_LONG
+                    ).show()
+                }
+            }
+        }
+    }
+
     val exportLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("application/pdf")
     ) { uri ->
@@ -1500,6 +1541,7 @@ private fun ReaderScreen(
                         session = session,
                         inkStore = inkStore,
                         textStore = textStore,
+                        imageStore = imageStore,
                         destination = uri,
                         onProgress = { completed, total ->
                             exportCompleted = completed
@@ -1593,6 +1635,7 @@ private fun ReaderScreen(
     LaunchedEffect(pager.currentPage) {
         lassoSelectionActive = false
         activeTextBoxId = null
+        activeImageId = null
         activeInkView = null
         onPageChanged(pager.currentPage)
     }
@@ -1878,7 +1921,10 @@ private fun ReaderScreen(
                     tool = tool,
                     strokes = remember(inkRevision, page) { inkStore.page(page) },
                     textBoxes = remember(textRevision, page) { textStore.page(page) },
+                    images = remember(imageRevision, page) { imageStore.page(page) },
+                    imageStore = imageStore,
                     activeTextBoxId = activeTextBoxId,
+                    activeImageId = activeImageId,
                     highlight = hits.getOrNull(selectedHit)?.takeIf { it.pageIndex == page },
                     inkColor = if (tool == InkTool.HIGHLIGHTER) highlighterColor else penColor,
                     penWidthDp = penWidth,
@@ -1906,6 +1952,20 @@ private fun ReaderScreen(
                         }
                     },
                     onActivateTextBox = { id -> activeTextBoxId = id },
+                    onUpdateImage = { image ->
+                        scope.launch {
+                            imageStore.update(page, image)
+                            imageRevision++
+                        }
+                    },
+                    onDeleteImage = { id ->
+                        scope.launch {
+                            imageStore.delete(page, id)
+                            if (activeImageId == id) activeImageId = null
+                            imageRevision++
+                        }
+                    },
+                    onActivateImage = { id -> activeImageId = id },
                     onViewReady = { view ->
                         if (page == pager.currentPage) activeInkView = view
                     },
@@ -1932,6 +1992,34 @@ private fun ReaderScreen(
                         }
                     }
                 )
+            }
+        }
+
+        if (tool == InkTool.IMAGE) {
+            Surface(
+                tonalElevation = 2.dp,
+                color = MaterialTheme.colorScheme.surface
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 7.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    TextButton(
+                        onClick = { imagePicker.launch(arrayOf("image/*")) }
+                    ) {
+                        Icon(ImageIcon, contentDescription = null)
+                        Spacer(Modifier.width(6.dp))
+                        Text(stringResource(R.string.action_insert_image))
+                    }
+                    Text(
+                        stringResource(R.string.image_edit_hint),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
             }
         }
 
@@ -2042,6 +2130,17 @@ private fun ReaderScreen(
                     onClick = {
                         tool = InkTool.TEXT
                         showPenOptions = false
+                    }
+                )
+                Spacer(Modifier.width(8.dp))
+                ToolButton(
+                    selected = tool == InkTool.IMAGE,
+                    label = stringResource(R.string.tool_image),
+                    icon = { Icon(ImageIcon, contentDescription = null) },
+                    onClick = {
+                        tool = InkTool.IMAGE
+                        showPenOptions = false
+                        activeTextBoxId = null
                     }
                 )
                 if (tool == InkTool.LASSO && lassoSelectionActive) {
@@ -2806,13 +2905,304 @@ private fun TextBoxLayer(
 }
 
 @Composable
+private fun PageImageLayer(
+    images: List<PageImageNote>,
+    store: ImageStore,
+    editable: Boolean,
+    activeImageId: String?,
+    onActivate: (String) -> Unit,
+    onUpdate: (PageImageNote) -> Unit,
+    onDelete: (String) -> Unit,
+) {
+    var cropTarget by remember { mutableStateOf<PageImageNote?>(null) }
+
+    cropTarget?.let { target ->
+        var draft by remember(
+            target.id,
+            target.cropLeft,
+            target.cropTop,
+            target.cropRight,
+            target.cropBottom,
+        ) { mutableStateOf(target) }
+
+        AlertDialog(
+            onDismissRequest = { cropTarget = null },
+            title = { Text(stringResource(R.string.image_crop_title)) },
+            text = {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Text(stringResource(R.string.image_crop_left))
+                    Slider(
+                        value = draft.cropLeft,
+                        onValueChange = {
+                            draft = draft.copy(
+                                cropLeft = it.coerceIn(0f, draft.cropRight - 0.05f)
+                            )
+                        },
+                        valueRange = 0f..0.9f
+                    )
+                    Text(stringResource(R.string.image_crop_right))
+                    Slider(
+                        value = draft.cropRight,
+                        onValueChange = {
+                            draft = draft.copy(
+                                cropRight = it.coerceIn(draft.cropLeft + 0.05f, 1f)
+                            )
+                        },
+                        valueRange = 0.1f..1f
+                    )
+                    Text(stringResource(R.string.image_crop_top))
+                    Slider(
+                        value = draft.cropTop,
+                        onValueChange = {
+                            draft = draft.copy(
+                                cropTop = it.coerceIn(0f, draft.cropBottom - 0.05f)
+                            )
+                        },
+                        valueRange = 0f..0.9f
+                    )
+                    Text(stringResource(R.string.image_crop_bottom))
+                    Slider(
+                        value = draft.cropBottom,
+                        onValueChange = {
+                            draft = draft.copy(
+                                cropBottom = it.coerceIn(draft.cropTop + 0.05f, 1f)
+                            )
+                        },
+                        valueRange = 0.1f..1f
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        onUpdate(draft)
+                        cropTarget = null
+                    }
+                ) {
+                    Text(stringResource(R.string.action_apply))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { cropTarget = null }) {
+                    Text(stringResource(R.string.action_cancel))
+                }
+            }
+        )
+    }
+
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        val density = LocalDensity.current
+        val pageWidthPx = with(density) { maxWidth.toPx() }.coerceAtLeast(1f)
+        val pageHeightPx = with(density) { maxHeight.toPx() }.coerceAtLeast(1f)
+
+        images.forEach { image ->
+            var localImage by remember(
+                image.id,
+                image.x,
+                image.y,
+                image.width,
+                image.height,
+                image.rotationDegrees,
+                image.locked,
+                image.cropLeft,
+                image.cropTop,
+                image.cropRight,
+                image.cropBottom,
+            ) { mutableStateOf(image) }
+            val isActive = editable && activeImageId == image.id
+            val bitmap by produceState<Bitmap?>(
+                initialValue = null,
+                image.id,
+                image.fileName,
+                image.cropLeft,
+                image.cropTop,
+                image.cropRight,
+                image.cropBottom,
+            ) {
+                value = store.loadBitmap(image, 1200)
+            }
+
+            Surface(
+                onClick = {
+                    if (editable) onActivate(image.id)
+                },
+                modifier = Modifier
+                    .offset(
+                        x = maxWidth * localImage.x,
+                        y = maxHeight * localImage.y
+                    )
+                    .width(maxWidth * localImage.width)
+                    .height(maxHeight * localImage.height)
+                    .graphicsLayer { rotationZ = localImage.rotationDegrees }
+                    .pointerInput(
+                        editable,
+                        localImage.locked,
+                        image.id,
+                        pageWidthPx,
+                        pageHeightPx,
+                    ) {
+                        if (!editable || localImage.locked) return@pointerInput
+                        detectDragGestures(
+                            onDragEnd = { onUpdate(localImage) },
+                            onDragCancel = { localImage = image }
+                        ) { change, drag ->
+                            change.consume()
+                            localImage = localImage.copy(
+                                x = (localImage.x + drag.x / pageWidthPx)
+                                    .coerceIn(0f, (1f - localImage.width).coerceAtLeast(0f)),
+                                y = (localImage.y + drag.y / pageHeightPx)
+                                    .coerceIn(0f, (1f - localImage.height).coerceAtLeast(0f)),
+                            )
+                        }
+                    },
+                shape = RoundedCornerShape(4.dp),
+                color = Color.Transparent,
+                border = if (isActive) {
+                    BorderStroke(2.dp, MaterialTheme.colorScheme.primary)
+                } else null
+            ) {
+                Box(Modifier.fillMaxSize()) {
+                    val bmp = bitmap
+                    if (bmp != null) {
+                        Image(
+                            bitmap = bmp.asImageBitmap(),
+                            contentDescription = stringResource(R.string.inserted_image),
+                            modifier = Modifier.fillMaxSize(),
+                            contentScale = ContentScale.FillBounds
+                        )
+                    }
+
+                    if (isActive) {
+                        Row(
+                            modifier = Modifier
+                                .align(Alignment.TopCenter)
+                                .background(
+                                    MaterialTheme.colorScheme.surface.copy(alpha = 0.92f),
+                                    RoundedCornerShape(14.dp)
+                                ),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            IconButton(
+                                onClick = {
+                                    val next = localImage.copy(
+                                        rotationDegrees = localImage.rotationDegrees - 15f
+                                    )
+                                    localImage = next
+                                    onUpdate(next)
+                                },
+                                modifier = Modifier.size(30.dp)
+                            ) {
+                                Icon(
+                                    Icons.Default.RotateLeft,
+                                    contentDescription = stringResource(R.string.image_rotate_left)
+                                )
+                            }
+                            IconButton(
+                                onClick = {
+                                    val next = localImage.copy(
+                                        rotationDegrees = localImage.rotationDegrees + 15f
+                                    )
+                                    localImage = next
+                                    onUpdate(next)
+                                },
+                                modifier = Modifier.size(30.dp)
+                            ) {
+                                Icon(
+                                    Icons.Default.RotateRight,
+                                    contentDescription = stringResource(R.string.image_rotate_right)
+                                )
+                            }
+                            IconButton(
+                                onClick = { cropTarget = localImage },
+                                modifier = Modifier.size(30.dp)
+                            ) {
+                                Icon(
+                                    Icons.Default.Crop,
+                                    contentDescription = stringResource(R.string.image_crop_title)
+                                )
+                            }
+                            IconButton(
+                                onClick = {
+                                    val next = localImage.copy(locked = !localImage.locked)
+                                    localImage = next
+                                    onUpdate(next)
+                                },
+                                modifier = Modifier.size(30.dp)
+                            ) {
+                                Icon(
+                                    if (localImage.locked) Icons.Default.Lock else Icons.Default.LockOpen,
+                                    contentDescription = stringResource(
+                                        if (localImage.locked) R.string.image_unlock else R.string.image_lock
+                                    )
+                                )
+                            }
+                            IconButton(
+                                onClick = { onDelete(localImage.id) },
+                                modifier = Modifier.size(30.dp)
+                            ) {
+                                Icon(
+                                    Icons.Default.Delete,
+                                    contentDescription = stringResource(R.string.image_delete)
+                                )
+                            }
+                        }
+
+                        if (!localImage.locked) {
+                            Surface(
+                                modifier = Modifier
+                                    .align(Alignment.BottomEnd)
+                                    .size(30.dp)
+                                    .pointerInput(
+                                        image.id,
+                                        pageWidthPx,
+                                        pageHeightPx,
+                                    ) {
+                                        detectDragGestures(
+                                            onDragEnd = { onUpdate(localImage) },
+                                            onDragCancel = { localImage = image }
+                                        ) { change, drag ->
+                                            change.consume()
+                                            localImage = localImage.copy(
+                                                width = (localImage.width + drag.x / pageWidthPx)
+                                                    .coerceIn(0.08f, 1f - localImage.x),
+                                                height = (localImage.height + drag.y / pageHeightPx)
+                                                    .coerceIn(0.08f, 1f - localImage.y),
+                                            )
+                                        }
+                                    },
+                                shape = CircleShape,
+                                color = MaterialTheme.colorScheme.primaryContainer
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Text(
+                                        "↘",
+                                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                        style = MaterialTheme.typography.labelLarge
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun PdfInkPage(
     session: PdfSession,
     pageIndex: Int,
     tool: InkTool,
     strokes: List<dev.munote.app.ink.InkStroke>,
     textBoxes: List<TextBoxNote>,
+    images: List<PageImageNote>,
+    imageStore: ImageStore,
     activeTextBoxId: String?,
+    activeImageId: String?,
     highlight: SearchHit?,
     inkColor: Int,
     penWidthDp: Float,
@@ -2823,6 +3213,9 @@ private fun PdfInkPage(
     onUpdateTextBox: (TextBoxNote) -> Unit,
     onDeleteTextBox: (String) -> Unit,
     onActivateTextBox: (String) -> Unit,
+    onUpdateImage: (PageImageNote) -> Unit,
+    onDeleteImage: (String) -> Unit,
+    onActivateImage: (String) -> Unit,
     onViewReady: (InkCanvasView) -> Unit,
     onSelectionChanged: (Boolean) -> Unit,
     onPageSwipe: (Int) -> Unit,
@@ -2970,7 +3363,7 @@ private fun PdfInkPage(
 
                     if (
                         !fingerWritingEnabled &&
-                        tool != InkTool.TEXT &&
+                        tool != InkTool.TEXT && tool != InkTool.IMAGE &&
                         !pinched &&
                         !threeFingerGesture &&
                         scale <= 1.01f &&
@@ -3061,6 +3454,18 @@ private fun PdfInkPage(
                     }
                 }
 
+                if (tool != InkTool.IMAGE) {
+                    PageImageLayer(
+                        images = images,
+                        store = imageStore,
+                        editable = false,
+                        activeImageId = activeImageId,
+                        onActivate = onActivateImage,
+                        onUpdate = onUpdateImage,
+                        onDelete = onDeleteImage,
+                    )
+                }
+
                 AndroidView(
                     factory = { ctx ->
                         InkCanvasView(ctx).apply {
@@ -3090,6 +3495,18 @@ private fun PdfInkPage(
                     },
                     modifier = Modifier.fillMaxSize()
                 )
+
+                if (tool == InkTool.IMAGE) {
+                    PageImageLayer(
+                        images = images,
+                        store = imageStore,
+                        editable = true,
+                        activeImageId = activeImageId,
+                        onActivate = onActivateImage,
+                        onUpdate = onUpdateImage,
+                        onDelete = onDeleteImage,
+                    )
+                }
 
                 if (tool == InkTool.TEXT) {
                     Box(
