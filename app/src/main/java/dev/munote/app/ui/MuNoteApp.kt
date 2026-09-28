@@ -4,6 +4,7 @@ import android.graphics.Bitmap
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -12,6 +13,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
@@ -22,6 +24,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
@@ -35,6 +39,8 @@ import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.List
+import androidx.compose.material.icons.filled.Redo
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Undo
 import androidx.compose.material3.AssistChip
@@ -217,8 +223,16 @@ private fun ReaderScreen(
     var query by remember { mutableStateOf("") }
     var hits by remember { mutableStateOf<List<SearchHit>>(emptyList()) }
     var selectedHit by remember { mutableIntStateOf(0) }
+
     var tool by remember { mutableStateOf(InkTool.PEN) }
     var inkRevision by remember { mutableIntStateOf(0) }
+    var showThumbnails by remember { mutableStateOf(false) }
+    var showPenOptions by remember { mutableStateOf(false) }
+
+    var penColor by remember { mutableIntStateOf(0xFF1C1D1F.toInt()) }
+    var highlighterColor by remember { mutableIntStateOf(0xFFFFD54F.toInt()) }
+    var penWidth by remember { mutableStateOf(2.15f) }
+    var highlighterWidth by remember { mutableStateOf(12f) }
 
     suspend fun goToHit(index: Int) {
         if (hits.isEmpty()) return
@@ -241,12 +255,15 @@ private fun ReaderScreen(
                 Row(
                     Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                        .padding(horizontal = 10.dp, vertical = 7.dp),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
                     IconButton(onClick = onOpenPdf) {
                         Icon(Icons.Default.FolderOpen, contentDescription = "打开 PDF")
+                    }
+                    IconButton(onClick = { showThumbnails = !showThumbnails }) {
+                        Icon(Icons.Default.List, contentDescription = "页面缩略图")
                     }
                     OutlinedTextField(
                         value = query,
@@ -275,9 +292,9 @@ private fun ReaderScreen(
                     if (ocrRunning) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            horizontalArrangement = Arrangement.spacedBy(5.dp)
                         ) {
-                            CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                            CircularProgressIndicator(Modifier.size(17.dp), strokeWidth = 2.dp)
                             Text(
                                 "${ocrDone}/${session.pageCount}",
                                 style = MaterialTheme.typography.labelMedium
@@ -290,7 +307,7 @@ private fun ReaderScreen(
                     if (hits.isEmpty()) {
                         Text(
                             if (ocrRunning) "正在继续识别，当前暂无匹配" else "没有找到",
-                            modifier = Modifier.padding(horizontal = 18.dp, vertical = 6.dp),
+                            modifier = Modifier.padding(horizontal = 18.dp, vertical = 5.dp),
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             style = MaterialTheme.typography.bodySmall
                         )
@@ -319,31 +336,64 @@ private fun ReaderScreen(
             }
         }
 
-        HorizontalPager(
-            state = pager,
-            modifier = Modifier
+        Row(
+            Modifier
                 .weight(1f)
-                .fillMaxWidth(),
-            beyondViewportPageCount = 1
-        ) { page ->
-            PdfInkPage(
-                session = session,
-                pageIndex = page,
+                .fillMaxWidth()
+        ) {
+            if (showThumbnails) {
+                ThumbnailRail(
+                    session = session,
+                    currentPage = pager.currentPage,
+                    onPageClick = { page ->
+                        scope.launch { pager.animateScrollToPage(page) }
+                    }
+                )
+            }
+
+            HorizontalPager(
+                state = pager,
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxHeight(),
+                beyondViewportPageCount = 1
+            ) { page ->
+                PdfInkPage(
+                    session = session,
+                    pageIndex = page,
+                    tool = tool,
+                    strokes = remember(inkRevision, page) { inkStore.page(page) },
+                    highlight = hits.getOrNull(selectedHit)?.takeIf { it.pageIndex == page },
+                    inkColor = if (tool == InkTool.HIGHLIGHTER) highlighterColor else penColor,
+                    penWidthDp = penWidth,
+                    highlighterWidthDp = highlighterWidth,
+                    onStroke = { stroke ->
+                        scope.launch {
+                            inkStore.append(page, stroke)
+                            inkRevision++
+                        }
+                    },
+                    onMutated = { strokes ->
+                        scope.launch {
+                            inkStore.replacePage(page, strokes)
+                            inkRevision++
+                        }
+                    }
+                )
+            }
+        }
+
+        if (showPenOptions && tool != InkTool.ERASER) {
+            PenOptionsBar(
                 tool = tool,
-                strokes = remember(inkRevision, page) { inkStore.page(page) },
-                highlight = hits.getOrNull(selectedHit)?.takeIf { it.pageIndex == page },
-                onStroke = { stroke ->
-                    scope.launch {
-                        inkStore.append(page, stroke)
-                        inkRevision++
-                    }
-                },
-                onMutated = { strokes ->
-                    scope.launch {
-                        inkStore.replacePage(page, strokes)
-                        inkRevision++
-                    }
-                }
+                penColor = penColor,
+                highlighterColor = highlighterColor,
+                penWidth = penWidth,
+                highlighterWidth = highlighterWidth,
+                onPenColor = { penColor = it },
+                onHighlighterColor = { highlighterColor = it },
+                onPenWidth = { penWidth = it },
+                onHighlighterWidth = { highlighterWidth = it },
             )
         }
 
@@ -355,7 +405,8 @@ private fun ReaderScreen(
                 Modifier
                     .fillMaxWidth()
                     .height(64.dp)
-                    .padding(horizontal = 16.dp),
+                    .horizontalScroll(rememberScrollState())
+                    .padding(horizontal = 14.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.Center
             ) {
@@ -363,24 +414,40 @@ private fun ReaderScreen(
                     selected = tool == InkTool.PEN,
                     label = "钢笔",
                     icon = { Icon(Icons.Default.Brush, contentDescription = null) },
-                    onClick = { tool = InkTool.PEN }
+                    onClick = {
+                        if (tool == InkTool.PEN) showPenOptions = !showPenOptions
+                        else {
+                            tool = InkTool.PEN
+                            showPenOptions = false
+                        }
+                    }
                 )
                 Spacer(Modifier.width(8.dp))
                 ToolButton(
                     selected = tool == InkTool.HIGHLIGHTER,
                     label = "荧光",
                     icon = { Text("▰") },
-                    onClick = { tool = InkTool.HIGHLIGHTER }
+                    onClick = {
+                        if (tool == InkTool.HIGHLIGHTER) showPenOptions = !showPenOptions
+                        else {
+                            tool = InkTool.HIGHLIGHTER
+                            showPenOptions = false
+                        }
+                    }
                 )
                 Spacer(Modifier.width(8.dp))
                 ToolButton(
                     selected = tool == InkTool.ERASER,
                     label = "橡皮",
                     icon = { Icon(Icons.Default.Clear, contentDescription = null) },
-                    onClick = { tool = InkTool.ERASER }
+                    onClick = {
+                        tool = InkTool.ERASER
+                        showPenOptions = false
+                    }
                 )
-                Spacer(Modifier.width(18.dp))
+                Spacer(Modifier.width(14.dp))
                 IconButton(
+                    enabled = inkStore.canUndo(pager.currentPage),
                     onClick = {
                         scope.launch {
                             inkStore.undo(pager.currentPage)
@@ -390,7 +457,18 @@ private fun ReaderScreen(
                 ) {
                     Icon(Icons.Default.Undo, contentDescription = "撤销")
                 }
-                Spacer(Modifier.width(18.dp))
+                IconButton(
+                    enabled = inkStore.canRedo(pager.currentPage),
+                    onClick = {
+                        scope.launch {
+                            inkStore.redo(pager.currentPage)
+                            inkRevision++
+                        }
+                    }
+                ) {
+                    Icon(Icons.Default.Redo, contentDescription = "重做")
+                }
+                Spacer(Modifier.width(12.dp))
                 IconButton(
                     onClick = {
                         scope.launch {
@@ -419,6 +497,207 @@ private fun ReaderScreen(
             }
         }
     }
+}
+
+@Composable
+private fun ThumbnailRail(
+    session: PdfSession,
+    currentPage: Int,
+    onPageClick: (Int) -> Unit,
+) {
+    val listState = rememberLazyListState()
+
+    LaunchedEffect(currentPage) {
+        if (!listState.isScrollInProgress) {
+            listState.animateScrollToItem(currentPage)
+        }
+    }
+
+    Surface(
+        modifier = Modifier
+            .width(116.dp)
+            .fillMaxHeight(),
+        tonalElevation = 1.dp,
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)
+    ) {
+        LazyColumn(
+            state = listState,
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 10.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            items(
+                count = session.pageCount,
+                key = { it }
+            ) { page ->
+                ThumbnailCard(
+                    session = session,
+                    pageIndex = page,
+                    selected = page == currentPage,
+                    onClick = { onPageClick(page) }
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ThumbnailCard(
+    session: PdfSession,
+    pageIndex: Int,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    val bitmap by produceState<Bitmap?>(initialValue = null, session.fingerprint, pageIndex) {
+        value = withContext(Dispatchers.IO) {
+            session.renderPage(pageIndex, 220)
+        }
+    }
+
+    val border = if (selected) {
+        BorderStroke(2.dp, MaterialTheme.colorScheme.primary)
+    } else {
+        BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+    }
+
+    Surface(
+        onClick = onClick,
+        shape = RoundedCornerShape(8.dp),
+        border = border,
+        color = Color.White,
+        shadowElevation = if (selected) 2.dp else 0.dp
+    ) {
+        Column(
+            modifier = Modifier.padding(4.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            val bmp = bitmap
+            if (bmp == null) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(118.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                }
+            } else {
+                Image(
+                    bitmap = bmp.asImageBitmap(),
+                    contentDescription = "第 ${pageIndex + 1} 页缩略图",
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .aspectRatio(bmp.width.toFloat() / bmp.height.toFloat()),
+                    contentScale = ContentScale.FillBounds
+                )
+            }
+            Text(
+                "${pageIndex + 1}",
+                modifier = Modifier.padding(top = 3.dp),
+                color = Color(0xFF515151),
+                style = MaterialTheme.typography.labelSmall
+            )
+        }
+    }
+}
+
+@Composable
+private fun PenOptionsBar(
+    tool: InkTool,
+    penColor: Int,
+    highlighterColor: Int,
+    penWidth: Float,
+    highlighterWidth: Float,
+    onPenColor: (Int) -> Unit,
+    onHighlighterColor: (Int) -> Unit,
+    onPenWidth: (Float) -> Unit,
+    onHighlighterWidth: (Float) -> Unit,
+) {
+    val isHighlighter = tool == InkTool.HIGHLIGHTER
+    val currentWidth = if (isHighlighter) highlighterWidth else penWidth
+    val widths = if (isHighlighter) listOf(8f, 12f, 16f) else listOf(1.4f, 2.15f, 3.0f)
+    val colors = if (isHighlighter) {
+        listOf(
+            0xFFFFD54F.toInt(),
+            0xFF80DEEA.toInt(),
+            0xFFF48FB1.toInt(),
+            0xFFA5D6A7.toInt(),
+            0xFFCE93D8.toInt(),
+        )
+    } else {
+        listOf(
+            0xFF1C1D1F.toInt(),
+            0xFF3157C8.toInt(),
+            0xFFC93C3C.toInt(),
+            0xFF26805A.toInt(),
+            0xFF7E57C2.toInt(),
+        )
+    }
+    val currentColor = if (isHighlighter) highlighterColor else penColor
+
+    Surface(
+        tonalElevation = 2.dp,
+        color = MaterialTheme.colorScheme.surface
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState())
+                .padding(horizontal = 16.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(9.dp)
+        ) {
+            Text(
+                if (isHighlighter) "荧光笔" else "钢笔",
+                style = MaterialTheme.typography.labelLarge
+            )
+            widths.forEach { width ->
+                AssistChip(
+                    onClick = {
+                        if (isHighlighter) onHighlighterWidth(width) else onPenWidth(width)
+                    },
+                    label = {
+                        Text(
+                            if (isHighlighter) "${width.toInt()}" else String.format("%.1f", width)
+                        )
+                    },
+                    leadingIcon = if (currentWidth == width) {
+                        { Text("●") }
+                    } else null
+                )
+            }
+            Spacer(Modifier.width(5.dp))
+            colors.forEach { color ->
+                ColorSwatch(
+                    colorArgb = color,
+                    selected = color == currentColor,
+                    onClick = {
+                        if (isHighlighter) onHighlighterColor(color) else onPenColor(color)
+                    }
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ColorSwatch(
+    colorArgb: Int,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    Surface(
+        onClick = onClick,
+        modifier = Modifier.size(30.dp),
+        shape = CircleShape,
+        color = Color(colorArgb),
+        border = if (selected) {
+            BorderStroke(3.dp, MaterialTheme.colorScheme.primary)
+        } else {
+            BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+        },
+        content = {}
+    )
 }
 
 @Composable
@@ -452,6 +731,9 @@ private fun PdfInkPage(
     tool: InkTool,
     strokes: List<dev.munote.app.ink.InkStroke>,
     highlight: SearchHit?,
+    inkColor: Int,
+    penWidthDp: Float,
+    highlighterWidthDp: Float,
     onStroke: (dev.munote.app.ink.InkStroke) -> Unit,
     onMutated: (List<dev.munote.app.ink.InkStroke>) -> Unit,
 ) {
@@ -526,6 +808,9 @@ private fun PdfInkPage(
                     factory = { ctx ->
                         InkCanvasView(ctx).apply {
                             this.tool = tool
+                            this.inkColor = inkColor
+                            this.penWidthDp = penWidthDp
+                            this.highlighterWidthDp = highlighterWidthDp
                             setStrokes(strokes)
                             onStrokeCommitted = onStroke
                             onPageMutated = onMutated
@@ -533,6 +818,9 @@ private fun PdfInkPage(
                     },
                     update = { view ->
                         view.tool = tool
+                        view.inkColor = inkColor
+                        view.penWidthDp = penWidthDp
+                        view.highlighterWidthDp = highlighterWidthDp
                         view.onStrokeCommitted = onStroke
                         view.onPageMutated = onMutated
                         if (view.snapshot() != strokes) view.setStrokes(strokes)

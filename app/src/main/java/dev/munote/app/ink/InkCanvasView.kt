@@ -13,15 +13,17 @@ import kotlin.math.pow
 /**
  * Tablet-first stylus layer.
  *
- * The live path deliberately stays native Android View/Canvas instead of Compose pointer input:
- * historical digitizer samples are preserved, finger gestures fall through to the PDF pager,
- * pressure is filtered separately from position, and the coordinate filter becomes more responsive
- * as speed rises so fast Chinese handwriting does not trail the pen.
+ * Historical digitizer samples are preserved, finger gestures fall through to the PDF UI,
+ * pressure is filtered separately from position, and smoothing becomes more responsive as speed
+ * rises so fast Chinese handwriting does not visibly trail the pen.
  */
 class InkCanvasView(context: Context) : View(context) {
     var tool: InkTool = InkTool.PEN
         set(value) { field = value; invalidate() }
     var inkColor: Int = Color.rgb(28, 29, 31)
+    var penWidthDp: Float = 2.15f
+    var highlighterWidthDp: Float = 12f
+
     var onStrokeCommitted: ((InkStroke) -> Unit)? = null
     var onPageMutated: ((List<InkStroke>) -> Unit)? = null
 
@@ -44,6 +46,11 @@ class InkCanvasView(context: Context) : View(context) {
     private var lastInputTime = 0L
     private var drawing = false
     private var gestureTool = InkTool.PEN
+
+    // Erasing is batched into one persisted edit per gesture. This makes undo useful and avoids
+    // writing the ink JSON repeatedly while the eraser moves across a page.
+    private var eraserBefore: List<InkStroke>? = null
+    private var eraserDirty = false
 
     init {
         isClickable = false
@@ -75,8 +82,11 @@ class InkCanvasView(context: Context) : View(context) {
                 gestureTool = if (toolType == MotionEvent.TOOL_TYPE_ERASER) InkTool.ERASER else tool
 
                 if (gestureTool == InkTool.ERASER) {
+                    eraserBefore = committed.toList()
+                    eraserDirty = false
                     eraseAt(event.x, event.y)
                 } else {
+                    eraserBefore = null
                     addPoint(event.x, event.y, event.pressure, event.eventTime, first = true)
                 }
                 invalidate()
@@ -86,8 +96,6 @@ class InkCanvasView(context: Context) : View(context) {
             MotionEvent.ACTION_MOVE -> {
                 if (!drawing) return true
 
-                // Historical samples are the difference between a 60/120 Hz event stream and the
-                // substantially higher-rate digitizer data many Android tablets actually provide.
                 for (h in 0 until event.historySize) {
                     val x = event.getHistoricalX(0, h)
                     val y = event.getHistoricalY(0, h)
@@ -105,23 +113,32 @@ class InkCanvasView(context: Context) : View(context) {
 
             MotionEvent.ACTION_UP -> {
                 val canceled = event.flags and MotionEvent.FLAG_CANCELED != 0
-                if (!canceled && drawing && gestureTool != InkTool.ERASER && active.isNotEmpty()) {
-                    val stroke = InkStroke(
-                        points = active.toList(),
-                        colorArgb = inkColor,
-                        baseWidthDp = if (gestureTool == InkTool.HIGHLIGHTER) 12f else 2.15f,
-                        highlighter = gestureTool == InkTool.HIGHLIGHTER,
-                    )
-                    committed.add(stroke)
-                    onStrokeCommitted?.invoke(stroke)
+                if (!canceled && drawing) {
+                    if (gestureTool == InkTool.ERASER) {
+                        if (eraserDirty) onPageMutated?.invoke(committed.toList())
+                    } else if (active.isNotEmpty()) {
+                        val stroke = InkStroke(
+                            points = active.toList(),
+                            colorArgb = inkColor,
+                            baseWidthDp = currentBaseWidth(),
+                            highlighter = gestureTool == InkTool.HIGHLIGHTER,
+                        )
+                        committed.add(stroke)
+                        onStrokeCommitted?.invoke(stroke)
+                    }
                 }
                 finishGesture()
                 return true
             }
 
             MotionEvent.ACTION_CANCEL -> {
-                // Palm rejection and parent gesture arbitration can end a stream with CANCEL.
-                // Never persist such a stroke.
+                // A cancelled eraser gesture must not silently destroy ink.
+                if (gestureTool == InkTool.ERASER) {
+                    eraserBefore?.let { before ->
+                        committed.clear()
+                        committed.addAll(before)
+                    }
+                }
                 finishGesture()
                 return true
             }
@@ -132,9 +149,14 @@ class InkCanvasView(context: Context) : View(context) {
     private fun finishGesture() {
         active.clear()
         drawing = false
+        eraserBefore = null
+        eraserDirty = false
         parent?.requestDisallowInterceptTouchEvent(false)
         invalidate()
     }
+
+    private fun currentBaseWidth(): Float =
+        if (gestureTool == InkTool.HIGHLIGHTER) highlighterWidthDp else penWidthDp
 
     private fun addPoint(
         xRaw: Float,
@@ -179,7 +201,6 @@ class InkCanvasView(context: Context) : View(context) {
             timeMs = time,
         )
 
-        // Avoid huge duplicate runs when the digitizer repeats a stationary sample.
         val last = active.lastOrNull()
         if (last == null || kotlin.math.abs(last.x - point.x) > 0.00002f ||
             kotlin.math.abs(last.y - point.y) > 0.00002f ||
@@ -204,7 +225,7 @@ class InkCanvasView(context: Context) : View(context) {
                 dx * dx + dy * dy <= 1f
             }
         }
-        if (before != committed.size) onPageMutated?.invoke(committed.toList())
+        if (before != committed.size) eraserDirty = true
     }
 
     override fun onDraw(canvas: Canvas) {
@@ -216,7 +237,7 @@ class InkCanvasView(context: Context) : View(context) {
                 InkStroke(
                     points = active,
                     colorArgb = inkColor,
-                    baseWidthDp = if (gestureTool == InkTool.HIGHLIGHTER) 12f else 2.15f,
+                    baseWidthDp = currentBaseWidth(),
                     highlighter = gestureTool == InkTool.HIGHLIGHTER,
                 )
             )
@@ -254,8 +275,6 @@ class InkCanvasView(context: Context) : View(context) {
             return
         }
 
-        // Quadratic midpoint smoothing keeps the live stroke visually continuous while still
-        // allowing width to respond sample-by-sample to pressure and speed.
         var fromX = pts[0].x * width
         var fromY = pts[0].y * height
         for (i in 1 until pts.lastIndex) {
@@ -302,6 +321,6 @@ class InkCanvasView(context: Context) : View(context) {
         val velocityThin = (speedPxMs / (3.0f * density)).coerceIn(0f, 0.24f)
         val factor = (0.48f + 0.90f * pressureCurve) * (1f - velocityThin)
         return (stroke.baseWidthDp * density * factor)
-            .coerceIn(0.72f * density, 3.2f * density)
+            .coerceIn(0.72f * density, 4.2f * density)
     }
 }

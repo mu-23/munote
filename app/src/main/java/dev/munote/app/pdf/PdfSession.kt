@@ -29,7 +29,7 @@ class PdfSession private constructor(
     }
 
     suspend fun renderPage(index: Int, targetWidthPx: Int): Bitmap = withContext(Dispatchers.IO) {
-        val width = targetWidthPx.coerceIn(640, 2400)
+        val width = targetWidthPx.coerceIn(160, 2400)
         val key = "${index}:${width}"
         cache.get(key)?.takeIf { !it.isRecycled }?.let { return@withContext it }
 
