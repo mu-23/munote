@@ -41,8 +41,8 @@
     <string name="template_dot">点阵</string>
 
     <string name="home_tagline">手写优先 · PDF OCR · 手写可搜索</string>
-    <string name="home_empty_title">把教材或扫描 PDF 放进来</string>
-    <string name="home_empty_description">首次导入后会保存在本机资料库，之后直接打开，并记住上次阅读位置。</string>
+    <string name="home_empty_title">新建笔记，或者导入教材和扫描 PDF</string>
+    <string name="home_empty_description">原生笔记和导入 PDF 都保存在本机资料库；支持空白、横线、方格、点阵纸张，并记住上次阅读位置。</string>
     <string name="recent_documents">最近文档</string>
     <string name="last_viewed_page">上次看到第 %1$d 页 · 本地保存</string>
     <string name="local_saved_auto_ocr">本地保存 · 打开后自动继续 OCR</string>

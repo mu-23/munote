@@ -41,8 +41,8 @@
     <string name="template_dot">Dot grid</string>
 
     <string name="home_tagline">Handwriting first · PDF OCR · Search your ink</string>
-    <string name="home_empty_title">Add a textbook or scanned PDF</string>
-    <string name="home_empty_description">After the first import, MuNote keeps a local copy so you can reopen it directly and resume from where you stopped.</string>
+    <string name="home_empty_title">Create a note, or import a textbook or scanned PDF</string>
+    <string name="home_empty_description">Native notes and imported PDFs stay in the local library. New notes support blank, ruled, grid, and dot-grid pages and remember where you stopped.</string>
     <string name="recent_documents">Recent documents</string>
     <string name="last_viewed_page">Last viewed: page %1$d · Saved locally</string>
     <string name="local_saved_auto_ocr">Saved locally · OCR resumes automatically</string>
