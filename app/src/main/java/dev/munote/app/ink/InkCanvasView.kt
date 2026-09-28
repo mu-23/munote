@@ -3,11 +3,17 @@ package dev.munote.app.ink
 import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.DashPathEffect
 import android.graphics.Paint
 import android.graphics.Path
+import android.graphics.PointF
+import android.graphics.RectF
 import android.view.MotionEvent
 import android.view.View
+import kotlin.math.abs
 import kotlin.math.hypot
+import kotlin.math.max
+import kotlin.math.min
 import kotlin.math.pow
 
 /**
@@ -16,10 +22,20 @@ import kotlin.math.pow
  * Historical digitizer samples are preserved, finger gestures fall through to the PDF UI,
  * pressure is filtered separately from position, and smoothing becomes more responsive as speed
  * rises so fast Chinese handwriting does not visibly trail the pen.
+ *
+ * Lasso selection is intentionally kept in this native view as well: selected vector strokes can
+ * be moved without rasterizing them or interfering with finger pan/zoom gestures.
  */
 class InkCanvasView(context: Context) : View(context) {
     var tool: InkTool = InkTool.PEN
-        set(value) { field = value; invalidate() }
+        set(value) {
+            if (field != value && value != InkTool.LASSO) {
+                clearSelection()
+            }
+            field = value
+            invalidate()
+        }
+
     var inkColor: Int = Color.rgb(28, 29, 31)
     var penWidthDp: Float = 2.15f
     var highlighterWidthDp: Float = 12f
@@ -32,6 +48,14 @@ class InkCanvasView(context: Context) : View(context) {
         style = Paint.Style.STROKE
         strokeCap = Paint.Cap.ROUND
         strokeJoin = Paint.Join.ROUND
+    }
+    private val overlayPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeCap = Paint.Cap.ROUND
+        strokeJoin = Paint.Join.ROUND
+        strokeWidth = 1.5f * density
+        color = Color.rgb(2, 132, 199)
+        pathEffect = DashPathEffect(floatArrayOf(7f * density, 5f * density), 0f)
     }
     private val path = Path()
     private val committed = mutableListOf<InkStroke>()
@@ -52,6 +76,15 @@ class InkCanvasView(context: Context) : View(context) {
     private var eraserBefore: List<InkStroke>? = null
     private var eraserDirty = false
 
+    // Lasso state is not persisted; only a resulting move mutates the stored vector strokes.
+    private val lassoPoints = mutableListOf<PointF>()
+    private val selectedIndices = linkedSetOf<Int>()
+    private var movingSelection = false
+    private var moveStartX = 0f
+    private var moveStartY = 0f
+    private var moveOrigin = emptyMap<Int, InkStroke>()
+    private var selectionDirty = false
+
     init {
         isClickable = false
         isFocusable = false
@@ -61,6 +94,7 @@ class InkCanvasView(context: Context) : View(context) {
         committed.clear()
         committed.addAll(strokes)
         active.clear()
+        clearSelection()
         invalidate()
     }
 
@@ -81,13 +115,22 @@ class InkCanvasView(context: Context) : View(context) {
                 active.clear()
                 gestureTool = if (toolType == MotionEvent.TOOL_TYPE_ERASER) InkTool.ERASER else tool
 
-                if (gestureTool == InkTool.ERASER) {
-                    eraserBefore = committed.toList()
-                    eraserDirty = false
-                    eraseAt(event.x, event.y)
-                } else {
-                    eraserBefore = null
-                    addPoint(event.x, event.y, event.pressure, event.eventTime, first = true)
+                when (gestureTool) {
+                    InkTool.ERASER -> {
+                        eraserBefore = committed.toList()
+                        eraserDirty = false
+                        eraseAt(event.x, event.y)
+                    }
+
+                    InkTool.LASSO -> {
+                        eraserBefore = null
+                        startLassoGesture(event.x, event.y)
+                    }
+
+                    else -> {
+                        eraserBefore = null
+                        addPoint(event.x, event.y, event.pressure, event.eventTime, first = true)
+                    }
                 }
                 invalidate()
                 return true
@@ -101,12 +144,24 @@ class InkCanvasView(context: Context) : View(context) {
                     val y = event.getHistoricalY(0, h)
                     val p = event.getHistoricalPressure(0, h)
                     val t = event.getHistoricalEventTime(h)
-                    if (gestureTool == InkTool.ERASER) eraseAt(x, y)
-                    else addPoint(x, y, p, t, first = false)
+                    when (gestureTool) {
+                        InkTool.ERASER -> eraseAt(x, y)
+                        InkTool.LASSO -> moveLassoGesture(x, y)
+                        else -> addPoint(x, y, p, t, first = false)
+                    }
                 }
 
-                if (gestureTool == InkTool.ERASER) eraseAt(event.x, event.y)
-                else addPoint(event.x, event.y, event.pressure, event.eventTime, first = false)
+                when (gestureTool) {
+                    InkTool.ERASER -> eraseAt(event.x, event.y)
+                    InkTool.LASSO -> moveLassoGesture(event.x, event.y)
+                    else -> addPoint(
+                        event.x,
+                        event.y,
+                        event.pressure,
+                        event.eventTime,
+                        first = false
+                    )
+                }
                 invalidate()
                 return true
             }
@@ -114,17 +169,25 @@ class InkCanvasView(context: Context) : View(context) {
             MotionEvent.ACTION_UP -> {
                 val canceled = event.flags and MotionEvent.FLAG_CANCELED != 0
                 if (!canceled && drawing) {
-                    if (gestureTool == InkTool.ERASER) {
-                        if (eraserDirty) onPageMutated?.invoke(committed.toList())
-                    } else if (active.isNotEmpty()) {
-                        val stroke = InkStroke(
-                            points = active.toList(),
-                            colorArgb = inkColor,
-                            baseWidthDp = currentBaseWidth(),
-                            highlighter = gestureTool == InkTool.HIGHLIGHTER,
-                        )
-                        committed.add(stroke)
-                        onStrokeCommitted?.invoke(stroke)
+                    when (gestureTool) {
+                        InkTool.ERASER -> {
+                            if (eraserDirty) onPageMutated?.invoke(committed.toList())
+                        }
+
+                        InkTool.LASSO -> finishLassoGesture(event.x, event.y)
+
+                        else -> {
+                            if (active.isNotEmpty()) {
+                                val stroke = InkStroke(
+                                    points = active.toList(),
+                                    colorArgb = inkColor,
+                                    baseWidthDp = currentBaseWidth(),
+                                    highlighter = gestureTool == InkTool.HIGHLIGHTER,
+                                )
+                                committed.add(stroke)
+                                onStrokeCommitted?.invoke(stroke)
+                            }
+                        }
                     }
                 }
                 finishGesture()
@@ -132,12 +195,24 @@ class InkCanvasView(context: Context) : View(context) {
             }
 
             MotionEvent.ACTION_CANCEL -> {
-                // A cancelled eraser gesture must not silently destroy ink.
-                if (gestureTool == InkTool.ERASER) {
-                    eraserBefore?.let { before ->
-                        committed.clear()
-                        committed.addAll(before)
+                when (gestureTool) {
+                    InkTool.ERASER -> {
+                        // A cancelled eraser gesture must not silently destroy ink.
+                        eraserBefore?.let { before ->
+                            committed.clear()
+                            committed.addAll(before)
+                        }
                     }
+
+                    InkTool.LASSO -> {
+                        // A cancelled move is reverted to its exact original vector strokes.
+                        if (movingSelection && moveOrigin.isNotEmpty()) {
+                            restoreMoveOrigin()
+                        }
+                        lassoPoints.clear()
+                    }
+
+                    else -> Unit
                 }
                 finishGesture()
                 return true
@@ -148,9 +223,13 @@ class InkCanvasView(context: Context) : View(context) {
 
     private fun finishGesture() {
         active.clear()
+        lassoPoints.clear()
         drawing = false
         eraserBefore = null
         eraserDirty = false
+        movingSelection = false
+        moveOrigin = emptyMap()
+        selectionDirty = false
         parent?.requestDisallowInterceptTouchEvent(false)
         invalidate()
     }
@@ -202,9 +281,9 @@ class InkCanvasView(context: Context) : View(context) {
         )
 
         val last = active.lastOrNull()
-        if (last == null || kotlin.math.abs(last.x - point.x) > 0.00002f ||
-            kotlin.math.abs(last.y - point.y) > 0.00002f ||
-            kotlin.math.abs(last.pressure - point.pressure) > 0.004f
+        if (last == null || abs(last.x - point.x) > 0.00002f ||
+            abs(last.y - point.y) > 0.00002f ||
+            abs(last.pressure - point.pressure) > 0.004f
         ) {
             active += point
         }
@@ -225,13 +304,182 @@ class InkCanvasView(context: Context) : View(context) {
                 dx * dx + dy * dy <= 1f
             }
         }
-        if (before != committed.size) eraserDirty = true
+        if (before != committed.size) {
+            eraserDirty = true
+            clearSelection()
+        }
+    }
+
+    private fun startLassoGesture(xRaw: Float, yRaw: Float) {
+        if (width <= 0 || height <= 0) return
+        val nx = (xRaw / width).coerceIn(0f, 1f)
+        val ny = (yRaw / height).coerceIn(0f, 1f)
+
+        val bounds = selectionBounds()
+        if (selectedIndices.isNotEmpty() && bounds != null && bounds.contains(nx, ny)) {
+            movingSelection = true
+            moveStartX = nx
+            moveStartY = ny
+            moveOrigin = selectedIndices
+                .filter { it in committed.indices }
+                .associateWith { committed[it] }
+            selectionDirty = false
+        } else {
+            movingSelection = false
+            selectedIndices.clear()
+            lassoPoints.clear()
+            lassoPoints += PointF(nx, ny)
+        }
+    }
+
+    private fun moveLassoGesture(xRaw: Float, yRaw: Float) {
+        if (width <= 0 || height <= 0) return
+        val nx = (xRaw / width).coerceIn(0f, 1f)
+        val ny = (yRaw / height).coerceIn(0f, 1f)
+
+        if (movingSelection) {
+            moveSelectionTo(nx, ny)
+            return
+        }
+
+        val last = lassoPoints.lastOrNull()
+        if (last == null || hypot(nx - last.x, ny - last.y) > 0.0025f) {
+            lassoPoints += PointF(nx, ny)
+        }
+    }
+
+    private fun finishLassoGesture(xRaw: Float, yRaw: Float) {
+        if (movingSelection) {
+            moveLassoGesture(xRaw, yRaw)
+            if (selectionDirty) onPageMutated?.invoke(committed.toList())
+            return
+        }
+
+        moveLassoGesture(xRaw, yRaw)
+        selectStrokesInsideLasso()
+    }
+
+    private fun selectStrokesInsideLasso() {
+        selectedIndices.clear()
+        if (lassoPoints.size < 3) return
+
+        committed.forEachIndexed { index, stroke ->
+            if (stroke.points.any { pointInPolygon(it.x, it.y, lassoPoints) }) {
+                selectedIndices += index
+            } else {
+                val bounds = strokeBounds(stroke)
+                if (bounds != null) {
+                    val centerX = (bounds.left + bounds.right) * 0.5f
+                    val centerY = (bounds.top + bounds.bottom) * 0.5f
+                    if (pointInPolygon(centerX, centerY, lassoPoints)) {
+                        selectedIndices += index
+                    }
+                }
+            }
+        }
+    }
+
+    private fun moveSelectionTo(nx: Float, ny: Float) {
+        if (moveOrigin.isEmpty()) return
+
+        val originBounds = boundsOfStrokes(moveOrigin.values.toList()) ?: return
+        var dx = nx - moveStartX
+        var dy = ny - moveStartY
+        dx = dx.coerceIn(-originBounds.left, 1f - originBounds.right)
+        dy = dy.coerceIn(-originBounds.top, 1f - originBounds.bottom)
+
+        moveOrigin.forEach { (index, stroke) ->
+            if (index !in committed.indices) return@forEach
+            committed[index] = stroke.copy(
+                points = stroke.points.map { point ->
+                    point.copy(
+                        x = (point.x + dx).coerceIn(0f, 1f),
+                        y = (point.y + dy).coerceIn(0f, 1f),
+                    )
+                }
+            )
+        }
+        selectionDirty = abs(dx) > 0.0002f || abs(dy) > 0.0002f
+    }
+
+    private fun restoreMoveOrigin() {
+        moveOrigin.forEach { (index, stroke) ->
+            if (index in committed.indices) committed[index] = stroke
+        }
+    }
+
+    private fun clearSelection() {
+        selectedIndices.clear()
+        lassoPoints.clear()
+        movingSelection = false
+        moveOrigin = emptyMap()
+        selectionDirty = false
+    }
+
+    private fun selectionBounds(): RectF? {
+        val selected = selectedIndices
+            .filter { it in committed.indices }
+            .map { committed[it] }
+        val bounds = boundsOfStrokes(selected) ?: return null
+        val pad = 0.012f
+        return RectF(
+            (bounds.left - pad).coerceAtLeast(0f),
+            (bounds.top - pad).coerceAtLeast(0f),
+            (bounds.right + pad).coerceAtMost(1f),
+            (bounds.bottom + pad).coerceAtMost(1f),
+        )
+    }
+
+    private fun boundsOfStrokes(strokes: List<InkStroke>): RectF? {
+        if (strokes.isEmpty()) return null
+        var left = 1f
+        var top = 1f
+        var right = 0f
+        var bottom = 0f
+        var found = false
+
+        strokes.forEach { stroke ->
+            stroke.points.forEach { point ->
+                found = true
+                left = min(left, point.x)
+                top = min(top, point.y)
+                right = max(right, point.x)
+                bottom = max(bottom, point.y)
+            }
+        }
+        return if (found) RectF(left, top, right, bottom) else null
+    }
+
+    private fun strokeBounds(stroke: InkStroke): RectF? =
+        boundsOfStrokes(listOf(stroke))
+
+    private fun pointInPolygon(x: Float, y: Float, polygon: List<PointF>): Boolean {
+        if (polygon.size < 3) return false
+        var inside = false
+        var j = polygon.lastIndex
+        for (i in polygon.indices) {
+            val xi = polygon[i].x
+            val yi = polygon[i].y
+            val xj = polygon[j].x
+            val yj = polygon[j].y
+
+            val crosses = ((yi > y) != (yj > y)) &&
+                (x < (xj - xi) * (y - yi) / ((yj - yi).takeIf { abs(it) > 1e-6f }
+                    ?: 1e-6f) + xi)
+            if (crosses) inside = !inside
+            j = i
+        }
+        return inside
     }
 
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
         committed.forEach { drawStroke(canvas, it) }
-        if (active.isNotEmpty() && gestureTool != InkTool.ERASER) {
+
+        if (active.isNotEmpty() &&
+            gestureTool != InkTool.ERASER &&
+            gestureTool != InkTool.LASSO
+        ) {
             drawStroke(
                 canvas,
                 InkStroke(
@@ -242,6 +490,30 @@ class InkCanvasView(context: Context) : View(context) {
                 )
             )
         }
+
+        if (tool == InkTool.LASSO || gestureTool == InkTool.LASSO) {
+            drawLassoOverlay(canvas)
+        }
+    }
+
+    private fun drawLassoOverlay(canvas: Canvas) {
+        if (lassoPoints.size >= 2 && !movingSelection) {
+            path.reset()
+            path.moveTo(lassoPoints[0].x * width, lassoPoints[0].y * height)
+            for (i in 1 until lassoPoints.size) {
+                path.lineTo(lassoPoints[i].x * width, lassoPoints[i].y * height)
+            }
+            canvas.drawPath(path, overlayPaint)
+        }
+
+        val bounds = selectionBounds() ?: return
+        canvas.drawRect(
+            bounds.left * width,
+            bounds.top * height,
+            bounds.right * width,
+            bounds.bottom * height,
+            overlayPaint
+        )
     }
 
     private fun drawStroke(canvas: Canvas, stroke: InkStroke) {
@@ -253,6 +525,7 @@ class InkCanvasView(context: Context) : View(context) {
         paint.strokeCap = Paint.Cap.ROUND
         paint.strokeJoin = Paint.Join.ROUND
         paint.style = Paint.Style.STROKE
+        paint.pathEffect = null
 
         if (pts.size == 1) {
             paint.style = Paint.Style.FILL
