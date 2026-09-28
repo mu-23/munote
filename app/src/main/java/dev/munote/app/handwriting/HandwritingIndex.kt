@@ -12,6 +12,7 @@ import com.google.mlkit.vision.digitalink.recognition.DigitalInkRecognizerOption
 import com.google.mlkit.vision.digitalink.recognition.Ink
 import com.google.mlkit.vision.digitalink.recognition.RecognitionContext
 import com.google.mlkit.vision.digitalink.recognition.WritingArea
+import dev.munote.app.R
 import dev.munote.app.ink.InkStroke
 import dev.munote.app.ocr.OcrRect
 import dev.munote.app.ocr.SearchHit
@@ -58,10 +59,10 @@ private data class HandwritingDocument(
  * runs locally on the device. Strokes are split into rough writing lines before recognition because
  * ML Kit's writing-area hint is most useful for a single line.
  */
-class ChineseHandwritingRecognizer {
+class ChineseHandwritingRecognizer(private val context: Context) {
     private val identifier = requireNotNull(
         DigitalInkRecognitionModelIdentifier.fromLanguageTag("zh-Hani-CN")
-    ) { "没有找到简体中文数字墨水模型" }
+    ) { context.getString(R.string.error_handwriting_model_missing) }
 
     private val model = DigitalInkRecognitionModel.builder(identifier).build()
     private val modelManager = RemoteModelManager.getInstance()
