@@ -538,9 +538,9 @@ private fun LibraryDocumentRow(
                 )
                 Text(
                     if (entry.lastPage > 0) {
-                        "上次看到第 ${entry.lastPage + 1} 页 · 本地保存"
+                        stringResource(R.string.last_viewed_page, entry.lastPage + 1)
                     } else {
-                        "本地保存 · 打开后自动继续 OCR"
+                        stringResource(R.string.local_saved_auto_ocr)
                     },
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     style = MaterialTheme.typography.bodySmall
@@ -640,13 +640,16 @@ private fun ReaderScreen(
                             exportTotal = total
                         },
                     )
-                    Toast.makeText(context, "已导出带批注 PDF", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(context, context.getString(R.string.toast_export_success), Toast.LENGTH_SHORT).show()
                 } catch (_: CancellationException) {
-                    Toast.makeText(context, "已取消导出", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(context, context.getString(R.string.toast_export_cancelled), Toast.LENGTH_SHORT).show()
                 } catch (error: Throwable) {
                     Toast.makeText(
                         context,
-                        "导出失败：${error.message ?: "未知错误"}",
+                        context.getString(
+                            R.string.error_export_failed,
+                            error.message ?: context.getString(R.string.error_export_unknown)
+                        ),
                         Toast.LENGTH_LONG
                     ).show()
                 } finally {
@@ -713,7 +716,7 @@ private fun ReaderScreen(
                         pageJumpText = value.filter { it.isDigit() }.take(6)
                     },
                     singleLine = true,
-                    label = { Text("页码 1-${session.pageCount}") }
+                    label = { Text(stringResource(R.string.label_page_range, session.pageCount)) }
                 )
             },
             confirmButton = {
@@ -780,7 +783,10 @@ private fun ReaderScreen(
                         IconButton(
                             onClick = {
                                 exportLauncher.launch(
-                                    documentTitle.take(80).ifBlank { "MuNote" } + "-批注.pdf"
+                                    context.getString(
+                                        R.string.export_filename,
+                                        documentTitle.take(80).ifBlank { "MuNote" }
+                                    )
                                 )
                             }
                         ) {
@@ -798,9 +804,9 @@ private fun ReaderScreen(
                             Icon(
                                 if (showBookmarksOnly) Icons.Default.Star else Icons.Default.StarBorder,
                                 contentDescription = if (showBookmarksOnly) {
-                                    "显示全部页面"
+                                    stringResource(R.string.cd_show_all_pages)
                                 } else {
-                                    "只看书签页"
+                                    stringResource(R.string.cd_bookmarks_only)
                                 }
                             )
                         }
@@ -810,9 +816,9 @@ private fun ReaderScreen(
                             if (pager.currentPage in bookmarks) Icons.Default.Star
                             else Icons.Default.StarBorder,
                             contentDescription = if (pager.currentPage in bookmarks) {
-                                "取消书签"
+                                stringResource(R.string.cd_remove_bookmark)
                             } else {
-                                "添加书签"
+                                stringResource(R.string.cd_add_bookmark)
                             }
                         )
                     }
@@ -871,9 +877,9 @@ private fun ReaderScreen(
                     if (hits.isEmpty()) {
                         Text(
                             when {
-                                ocrRunning -> "正在继续识别 PDF，当前暂无匹配"
+                                ocrRunning -> stringResource(R.string.search_pdf_processing)
                                 handwritingModelState == HandwritingModelState.DOWNLOADING ->
-                                    "手写识别模型下载中，PDF 搜索仍可用"
+                                    stringResource(R.string.search_handwriting_model_downloading)
                                 else -> stringResource(R.string.search_no_results)
                             },
                             modifier = Modifier.padding(horizontal = 18.dp, vertical = 5.dp),
@@ -893,9 +899,18 @@ private fun ReaderScreen(
                                     onClick = { scope.launch { goToHit(index) } },
                                     label = {
                                         val sourceLabel =
-                                            if (hit.source == SearchSource.HANDWRITING) "手写" else "PDF"
+                                            if (hit.source == SearchSource.HANDWRITING) {
+                                                stringResource(R.string.search_source_handwriting)
+                                            } else {
+                                                stringResource(R.string.search_source_pdf)
+                                            }
                                         Text(
-                                            "第 ${hit.pageIndex + 1} 页 · $sourceLabel · ${hit.snippet}",
+                                            stringResource(
+                                                R.string.search_result_label,
+                                                hit.pageIndex + 1,
+                                                sourceLabel,
+                                                hit.snippet
+                                            ),
                                             maxLines = 1
                                         )
                                     }
@@ -1215,7 +1230,7 @@ private fun ThumbnailCard(
             } else {
                 Image(
                     bitmap = bmp.asImageBitmap(),
-                    contentDescription = "第 ${pageIndex + 1} 页缩略图",
+                    contentDescription = stringResource(R.string.cd_page_thumbnail, pageIndex + 1),
                     modifier = Modifier
                         .fillMaxWidth()
                         .aspectRatio(bmp.width.toFloat() / bmp.height.toFloat()),
@@ -1291,7 +1306,11 @@ private fun PenOptionsBar(
             horizontalArrangement = Arrangement.spacedBy(9.dp)
         ) {
             Text(
-                if (isHighlighter) "荧光笔" else "钢笔",
+                if (isHighlighter) {
+                    stringResource(R.string.tool_highlighter_full)
+                } else {
+                    stringResource(R.string.tool_pen)
+                },
                 style = MaterialTheme.typography.labelLarge
             )
             widths.forEach { width ->
@@ -1519,7 +1538,7 @@ private fun PdfInkPage(
             Box(Modifier.fillMaxSize()) {
                 Image(
                     bitmap = bmp.asImageBitmap(),
-                    contentDescription = "PDF 第 ${pageIndex + 1} 页",
+                    contentDescription = stringResource(R.string.cd_pdf_page, pageIndex + 1),
                     modifier = Modifier.fillMaxSize(),
                     contentScale = ContentScale.FillBounds
                 )
@@ -1605,7 +1624,7 @@ private fun PdfInkPage(
                 tonalElevation = 2.dp
             ) {
                 Text(
-                    "${(scale * 100).roundToInt()}% · 适合页面",
+                    stringResource(R.string.zoom_fit_label, (scale * 100).roundToInt()),
                     modifier = Modifier.padding(horizontal = 11.dp, vertical = 7.dp),
                     style = MaterialTheme.typography.labelMedium
                 )
