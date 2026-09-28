@@ -1897,6 +1897,7 @@ private fun ReaderScreen(
     var showThumbnails by remember { mutableStateOf(false) }
     var showBookmarksOnly by remember { mutableStateOf(false) }
     var showPageOverview by remember { mutableStateOf(false) }
+    val topToolbarScroll = rememberScrollState()
     val pageHistory = remember { mutableStateListOf<Int>() }
     val inputPrefs = remember { context.getSharedPreferences("editor_preferences", android.content.Context.MODE_PRIVATE) }
     var fingerWriting by remember { mutableStateOf(inputPrefs.getBoolean("finger_writing", false)) }
@@ -2339,6 +2340,13 @@ private fun ReaderScreen(
                 Row(
                     Modifier
                         .fillMaxWidth()
+                        .then(
+                            if (splitMode) {
+                                Modifier.horizontalScroll(topToolbarScroll)
+                            } else {
+                                Modifier
+                            }
+                        )
                         .padding(horizontal = 10.dp, vertical = 7.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(4.dp)
@@ -2348,7 +2356,7 @@ private fun ReaderScreen(
                     }
                     Text(
                         documentTitle,
-                        modifier = Modifier.width(132.dp),
+                        modifier = Modifier.width(if (splitMode) 92.dp else 132.dp),
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         style = MaterialTheme.typography.labelLarge
@@ -2439,7 +2447,11 @@ private fun ReaderScreen(
                             query = it
                             selectedHit = 0
                         },
-                        modifier = Modifier.weight(1f),
+                        modifier = if (splitMode) {
+                            Modifier.width(190.dp)
+                        } else {
+                            Modifier.weight(1f)
+                        },
                         singleLine = true,
                         placeholder = { Text(stringResource(R.string.search_placeholder)) },
                         leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
