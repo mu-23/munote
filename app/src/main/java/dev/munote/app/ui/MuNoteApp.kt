@@ -1921,7 +1921,7 @@ private fun PdfInkPage(
             }
         }
 
-        val gestureModifier = Modifier.pointerInput(pageIndex, fingerWritingEnabled) {
+        val gestureModifier = Modifier.pointerInput(pageIndex, fingerWritingEnabled, tool) {
             awaitEachGesture {
                 val first = awaitFirstDown(requireUnconsumed = false)
 
@@ -1971,7 +1971,7 @@ private fun PdfInkPage(
                                 event.changes.forEach { it.consume() }
                             }
 
-                            down.size == 1 && !fingerWritingEnabled -> {
+                            down.size == 1 && !fingerWritingEnabled && tool != InkTool.TEXT -> {
                                 val change = down.first()
                                 val delta = change.positionChange()
 
@@ -1986,7 +1986,13 @@ private fun PdfInkPage(
                         }
                     }
 
-                    if (!fingerWritingEnabled && !pinched && !threeFingerGesture && scale <= 1.01f) {
+                    if (
+                        !fingerWritingEnabled &&
+                        tool != InkTool.TEXT &&
+                        !pinched &&
+                        !threeFingerGesture &&
+                        scale <= 1.01f
+                    ) {
                         val thresholdPx = with(density) { 72.dp.toPx() }
                         if (abs(dragX) >= thresholdPx && abs(dragX) > abs(dragY) * 1.15f) {
                             onPageSwipe(if (dragX < 0f) 1 else -1)
