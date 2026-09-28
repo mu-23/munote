@@ -1,7 +1,12 @@
 package dev.munote.app.pdf
 
 import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.graphics.Color
+import android.graphics.pdf.PdfRenderer
 import android.net.Uri
+import android.os.ParcelFileDescriptor
 import android.provider.OpenableColumns
 import dev.munote.app.R
 import kotlinx.coroutines.Dispatchers
@@ -10,6 +15,8 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.io.File
+import java.io.FileOutputStream
+import kotlin.math.max
 
 @Serializable
 data class LibraryEntry(
@@ -19,6 +26,7 @@ data class LibraryEntry(
     val lastOpenedAt: Long,
     val lastPage: Int = 0,
     val bookmarks: Set<Int> = emptySet(),
+    val hasCustomCover: Boolean = false,
 )
 
 @Serializable
@@ -29,13 +37,13 @@ private data class LibraryIndex(
 /**
  * Local-first document library.
  *
- * Imported PDFs live under files/documents/<sha256>.pdf. The library index keeps user-facing
- * metadata, resume position, and enough information to manage the document without asking the
- * system file picker again.
+ * Imported PDFs live under files/documents/<sha256>.pdf. Optional custom cover images are copied
+ * into app-private storage as well, so a library card never depends on a temporary external URI.
  */
 class PdfLibrary(private val context: Context) {
     private val json = Json { ignoreUnknownKeys = true; prettyPrint = false }
     private val documentsDir = File(context.filesDir, "documents").apply { mkdirs() }
+    private val coversDir = File(context.filesDir, "covers").apply { mkdirs() }
     private val indexFile = File(documentsDir, "library.json")
     private val entries = linkedMapOf<String, LibraryEntry>()
 
@@ -76,11 +84,14 @@ class PdfLibrary(private val context: Context) {
             val previous = synchronized(this@PdfLibrary) { entries[fingerprint] }
             val entry = LibraryEntry(
                 fingerprint = fingerprint,
-                title = title.ifBlank { previous?.title ?: context.getString(R.string.default_pdf_note) },
+                title = title.ifBlank {
+                    previous?.title ?: context.getString(R.string.default_pdf_note)
+                },
                 importedAt = previous?.importedAt ?: now,
                 lastOpenedAt = now,
                 lastPage = previous?.lastPage ?: 0,
                 bookmarks = previous?.bookmarks ?: emptySet(),
+                hasCustomCover = previous?.hasCustomCover ?: coverFile(fingerprint).exists(),
             )
             synchronized(this@PdfLibrary) {
                 entries[fingerprint] = entry
@@ -104,7 +115,9 @@ class PdfLibrary(private val context: Context) {
 
     suspend fun rename(entry: LibraryEntry, newTitle: String): LibraryEntry =
         withContext(Dispatchers.IO) {
-            val title = newTitle.trim().ifBlank { context.getString(R.string.default_pdf_note) }
+            val title = newTitle.trim().ifBlank {
+                context.getString(R.string.default_pdf_note)
+            }
             val current = synchronized(this@PdfLibrary) {
                 entries[entry.fingerprint] ?: entry
             }
@@ -121,16 +134,53 @@ class PdfLibrary(private val context: Context) {
             update(current.copy(bookmarks = bookmarks))
         }
 
+    suspend fun setCustomCover(entry: LibraryEntry, uri: Uri): LibraryEntry =
+        withContext(Dispatchers.IO) {
+            val file = coverFile(entry.fingerprint)
+            val temp = File(coversDir, "${entry.fingerprint}.cover.tmp")
+            context.contentResolver.openInputStream(uri).use { input ->
+                requireNotNull(input) { context.getString(R.string.error_cover_open) }
+                FileOutputStream(temp).use { output -> input.copyTo(output, 512 * 1024) }
+            }
+            if (file.exists()) file.delete()
+            check(temp.renameTo(file)) { context.getString(R.string.error_cover_save) }
+            val current = synchronized(this@PdfLibrary) {
+                entries[entry.fingerprint] ?: entry
+            }
+            update(current.copy(hasCustomCover = true))
+        }
+
+    suspend fun clearCustomCover(entry: LibraryEntry): LibraryEntry =
+        withContext(Dispatchers.IO) {
+            runCatching { coverFile(entry.fingerprint).delete() }
+            val current = synchronized(this@PdfLibrary) {
+                entries[entry.fingerprint] ?: entry
+            }
+            update(current.copy(hasCustomCover = false))
+        }
+
+    suspend fun renderCover(
+        entry: LibraryEntry,
+        targetWidthPx: Int = 360,
+    ): Bitmap? = withContext(Dispatchers.IO) {
+        val width = targetWidthPx.coerceIn(160, 900)
+        if (entry.hasCustomCover && coverFile(entry.fingerprint).exists()) {
+            decodeSampledBitmap(coverFile(entry.fingerprint), width)?.let {
+                return@withContext it
+            }
+        }
+        renderFirstPdfPage(documentFile(entry.fingerprint), width)
+    }
+
     suspend fun delete(entry: LibraryEntry) = withContext(Dispatchers.IO) {
         synchronized(this@PdfLibrary) {
             entries.remove(entry.fingerprint)
             persistLocked()
         }
 
-        // Document-related files are all keyed by the SHA-256 fingerprint, so deletion is scoped to
-        // this one library item. Failures are best-effort and do not leave a ghost entry in the UI.
         listOf(
             documentFile(entry.fingerprint),
+            coverFile(entry.fingerprint),
             File(File(context.filesDir, "ink"), "${entry.fingerprint}.json"),
             File(File(context.filesDir, "indexes"), "${entry.fingerprint}.json"),
             File(File(context.filesDir, "handwriting-indexes"), "${entry.fingerprint}.json"),
@@ -142,6 +192,60 @@ class PdfLibrary(private val context: Context) {
 
     fun documentFile(fingerprint: String): File =
         File(documentsDir, "${fingerprint}.pdf")
+
+    private fun coverFile(fingerprint: String): File =
+        File(coversDir, "${fingerprint}.cover")
+
+    private fun renderFirstPdfPage(file: File, targetWidthPx: Int): Bitmap? {
+        if (!file.exists()) return null
+        val descriptor = ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)
+        try {
+            val renderer = PdfRenderer(descriptor)
+            try {
+                if (renderer.pageCount <= 0) return null
+                val page = renderer.openPage(0)
+                try {
+                    val ratio = page.height.toFloat() / page.width.toFloat()
+                    val height = max(1, (targetWidthPx * ratio).toInt())
+                    return Bitmap.createBitmap(
+                        targetWidthPx,
+                        height,
+                        Bitmap.Config.ARGB_8888
+                    ).also { bitmap ->
+                        bitmap.eraseColor(Color.WHITE)
+                        page.render(
+                            bitmap,
+                            null,
+                            null,
+                            PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY
+                        )
+                    }
+                } finally {
+                    page.close()
+                }
+            } finally {
+                renderer.close()
+            }
+        } finally {
+            descriptor.close()
+        }
+    }
+
+    private fun decodeSampledBitmap(file: File, targetWidthPx: Int): Bitmap? {
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeFile(file.absolutePath, bounds)
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
+
+        var sample = 1
+        while (bounds.outWidth / (sample * 2) >= targetWidthPx) {
+            sample *= 2
+        }
+        val options = BitmapFactory.Options().apply {
+            inSampleSize = sample
+            inPreferredConfig = Bitmap.Config.ARGB_8888
+        }
+        return BitmapFactory.decodeFile(file.absolutePath, options)
+    }
 
     @Synchronized
     private fun update(entry: LibraryEntry): LibraryEntry {

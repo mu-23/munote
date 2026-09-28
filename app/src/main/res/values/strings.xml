@@ -12,6 +12,8 @@
     <string name="error_input_open">无法打开 PDF</string>
     <string name="error_local_pdf_missing">本地 PDF 已不存在</string>
     <string name="error_handwriting_model_missing">没有找到简体中文数字墨水模型</string>
+    <string name="error_cover_open">无法读取封面图片</string>
+    <string name="error_cover_save">封面保存失败</string>
 
     <string name="dialog_rename_title">重命名</string>
     <string name="label_document_name">文档名称</string>
@@ -20,6 +22,8 @@
     <string name="action_delete">删除</string>
     <string name="action_rename">重命名</string>
     <string name="action_import_pdf">导入 PDF</string>
+    <string name="action_set_cover">自定义封面</string>
+    <string name="action_reset_cover">恢复第一页封面</string>
     <string name="dialog_delete_title">删除这个文档？</string>
     <string name="dialog_delete_message">会删除 MuNote 本地保存的 PDF、手写笔迹和识别索引。原来文件管理器里的源 PDF 不受影响。</string>
 
