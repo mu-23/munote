@@ -391,7 +391,11 @@ fun MuNoteApp(initialPdf: Uri?) {
         if (splitSession != null) closeSplit() else closeDocument()
     }
 
-    LaunchedEffect(session?.fingerprint) {
+    LaunchedEffect(
+        session?.fingerprint,
+        session?.pageCount,
+        currentEntry?.pdfPageOrder,
+    ) {
         if (currentEntry?.kind == DocumentKind.NOTE) {
             ocrRunning = false
             ocrDone = 0
