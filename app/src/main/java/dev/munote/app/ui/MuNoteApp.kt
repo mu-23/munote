@@ -11,6 +11,7 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.background
@@ -39,6 +40,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
@@ -476,6 +478,79 @@ fun MuNoteApp(initialPdf: Uri?) {
                         }.onFailure {
                             loadError = it.message ?: context.getString(R.string.error_notebook_save)
                             libraryRevision++
+                        }
+                    }
+                }
+            },
+            onDeletePage = { page ->
+                currentEntry?.takeIf { it.kind == DocumentKind.NOTE }?.let { entry ->
+                    scope.launch {
+                        loadError = null
+                        runCatching {
+                            val updated = library.deleteNotebookPage(entry, page)
+                            inkStore?.deletePage(page)
+                            textStore?.deletePage(page)
+                            handwritingIndexStore?.deletePage(page)
+                            session?.close()
+                            session = null
+                            val next = PdfSession.openStored(context, updated.fingerprint)
+                            attachSession(next, updated)
+                        }.onFailure {
+                            loadError = it.message ?: context.getString(R.string.error_notebook_save)
+                        }
+                    }
+                }
+            },
+            onDuplicatePage = { page ->
+                currentEntry?.takeIf { it.kind == DocumentKind.NOTE }?.let { entry ->
+                    scope.launch {
+                        loadError = null
+                        runCatching {
+                            val updated = library.duplicateNotebookPage(entry, page)
+                            inkStore?.duplicatePage(page)
+                            textStore?.duplicatePage(page)
+                            handwritingIndexStore?.duplicatePage(page)
+                            session?.close()
+                            session = null
+                            val next = PdfSession.openStored(context, updated.fingerprint)
+                            attachSession(next, updated)
+                        }.onFailure {
+                            loadError = it.message ?: context.getString(R.string.error_notebook_save)
+                        }
+                    }
+                }
+            },
+            onMovePage = { from, to ->
+                currentEntry?.takeIf { it.kind == DocumentKind.NOTE }?.let { entry ->
+                    scope.launch {
+                        loadError = null
+                        runCatching {
+                            val updated = library.moveNotebookPage(entry, from, to)
+                            inkStore?.movePage(from, to)
+                            textStore?.movePage(from, to)
+                            handwritingIndexStore?.movePage(from, to)
+                            session?.close()
+                            session = null
+                            val next = PdfSession.openStored(context, updated.fingerprint)
+                            attachSession(next, updated)
+                        }.onFailure {
+                            loadError = it.message ?: context.getString(R.string.error_notebook_save)
+                        }
+                    }
+                }
+            },
+            onChangePageTemplate = { page, template ->
+                currentEntry?.takeIf { it.kind == DocumentKind.NOTE }?.let { entry ->
+                    scope.launch {
+                        loadError = null
+                        runCatching {
+                            val updated = library.setNotebookPageTemplate(entry, page, template)
+                            session?.close()
+                            session = null
+                            val next = PdfSession.openStored(context, updated.fingerprint)
+                            attachSession(next, updated)
+                        }.onFailure {
+                            loadError = it.message ?: context.getString(R.string.error_notebook_save)
                         }
                     }
                 }
@@ -1371,6 +1446,10 @@ private fun ReaderScreen(
     bookmarks: Set<Int>,
     isNotebook: Boolean,
     onAddPage: () -> Unit,
+    onDeletePage: (Int) -> Unit,
+    onDuplicatePage: (Int) -> Unit,
+    onMovePage: (Int, Int) -> Unit,
+    onChangePageTemplate: (Int, PageTemplate) -> Unit,
     onToggleBookmark: (Int) -> Unit,
     onPageChanged: (Int) -> Unit,
     onClose: () -> Unit,
@@ -1556,11 +1635,28 @@ private fun ReaderScreen(
             session = session,
             currentPage = pager.currentPage,
             bookmarks = bookmarks,
+            isNotebook = isNotebook,
             onDismiss = { showPageOverview = false },
             onSelectPage = { page ->
                 showPageOverview = false
                 scope.launch { jumpToPage(page) }
-            }
+            },
+            onDuplicatePage = { page ->
+                showPageOverview = false
+                onDuplicatePage(page)
+            },
+            onDeletePage = { page ->
+                showPageOverview = false
+                onDeletePage(page)
+            },
+            onChangePageTemplate = { page, template ->
+                showPageOverview = false
+                onChangePageTemplate(page, template)
+            },
+            onMovePage = { from, to ->
+                showPageOverview = false
+                onMovePage(from, to)
+            },
         )
     }
 
@@ -2041,9 +2137,29 @@ private fun PageOverviewDialog(
     session: PdfSession,
     currentPage: Int,
     bookmarks: Set<Int>,
+    isNotebook: Boolean,
     onDismiss: () -> Unit,
     onSelectPage: (Int) -> Unit,
+    onDuplicatePage: (Int) -> Unit,
+    onDeletePage: (Int) -> Unit,
+    onChangePageTemplate: (Int, PageTemplate) -> Unit,
+    onMovePage: (Int, Int) -> Unit,
 ) {
+    val pageOrder = remember(session.fingerprint, session.pageCount) {
+        mutableStateListOf<Int>().apply { addAll(0 until session.pageCount) }
+    }
+    val gridState = rememberLazyGridState()
+    var draggedPage by remember { mutableIntStateOf(-1) }
+    var draggedSlot by remember { mutableIntStateOf(-1) }
+
+    fun itemAt(x: Float, y: Float): Int? =
+        gridState.layoutInfo.visibleItemsInfo.firstOrNull { item ->
+            x >= item.offset.x &&
+                x <= item.offset.x + item.size.width &&
+                y >= item.offset.y &&
+                y <= item.offset.y + item.size.height
+        }?.index
+
     Dialog(
         onDismissRequest = onDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false)
@@ -2068,7 +2184,11 @@ private fun PageOverviewDialog(
                             style = MaterialTheme.typography.titleLarge
                         )
                         Text(
-                            stringResource(R.string.page_overview_hint),
+                            if (isNotebook) {
+                                stringResource(R.string.page_overview_manage_hint)
+                            } else {
+                                stringResource(R.string.page_overview_hint)
+                            },
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             style = MaterialTheme.typography.bodySmall
                         )
@@ -2080,24 +2200,141 @@ private fun PageOverviewDialog(
 
                 LazyVerticalGrid(
                     columns = GridCells.Adaptive(112.dp),
+                    state = gridState,
                     modifier = Modifier
                         .weight(1f)
-                        .fillMaxWidth(),
+                        .fillMaxWidth()
+                        .pointerInput(isNotebook, session.pageCount) {
+                            if (!isNotebook) return@pointerInput
+                            detectDragGesturesAfterLongPress(
+                                onDragStart = { offset ->
+                                    val slot = itemAt(offset.x, offset.y) ?: return@detectDragGesturesAfterLongPress
+                                    draggedSlot = slot
+                                    draggedPage = pageOrder.getOrElse(slot) { -1 }
+                                },
+                                onDrag = { change, _ ->
+                                    change.consume()
+                                    val target = itemAt(change.position.x, change.position.y)
+                                        ?: return@detectDragGesturesAfterLongPress
+                                    if (
+                                        draggedSlot >= 0 &&
+                                        target in pageOrder.indices &&
+                                        target != draggedSlot
+                                    ) {
+                                        val moving = pageOrder.removeAt(draggedSlot)
+                                        pageOrder.add(target, moving)
+                                        draggedSlot = target
+                                    }
+                                },
+                                onDragCancel = {
+                                    draggedPage = -1
+                                    draggedSlot = -1
+                                },
+                                onDragEnd = {
+                                    val from = draggedPage
+                                    val to = draggedSlot
+                                    draggedPage = -1
+                                    draggedSlot = -1
+                                    if (from >= 0 && to >= 0 && from != to) {
+                                        onMovePage(from, to)
+                                    }
+                                }
+                            )
+                        },
                     contentPadding = PaddingValues(14.dp),
                     horizontalArrangement = Arrangement.spacedBy(10.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     items(
-                        count = session.pageCount,
-                        key = { it }
-                    ) { page ->
-                        ThumbnailCard(
-                            session = session,
-                            pageIndex = page,
-                            selected = page == currentPage,
-                            bookmarked = page in bookmarks,
-                            onClick = { onSelectPage(page) }
-                        )
+                        count = pageOrder.size,
+                        key = { pageOrder[it] }
+                    ) { slot ->
+                        val page = pageOrder[slot]
+                        var menuExpanded by remember(page) { mutableStateOf(false) }
+
+                        Box(
+                            modifier = Modifier.graphicsLayer {
+                                alpha = if (page == draggedPage) 0.72f else 1f
+                            }
+                        ) {
+                            ThumbnailCard(
+                                session = session,
+                                pageIndex = page,
+                                selected = page == currentPage,
+                                bookmarked = page in bookmarks,
+                                onClick = { onSelectPage(page) }
+                            )
+
+                            if (isNotebook) {
+                                Box(Modifier.align(Alignment.TopEnd)) {
+                                    Surface(
+                                        shape = CircleShape,
+                                        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f)
+                                    ) {
+                                        IconButton(
+                                            onClick = { menuExpanded = true },
+                                            modifier = Modifier.size(32.dp)
+                                        ) {
+                                            Icon(
+                                                Icons.Default.MoreVert,
+                                                contentDescription = stringResource(
+                                                    R.string.cd_page_actions,
+                                                    page + 1
+                                                )
+                                            )
+                                        }
+                                    }
+                                    DropdownMenu(
+                                        expanded = menuExpanded,
+                                        onDismissRequest = { menuExpanded = false }
+                                    ) {
+                                        DropdownMenuItem(
+                                            text = { Text(stringResource(R.string.action_duplicate_page)) },
+                                            leadingIcon = {
+                                                Icon(Icons.Default.ContentCopy, contentDescription = null)
+                                            },
+                                            onClick = {
+                                                menuExpanded = false
+                                                onDuplicatePage(page)
+                                            }
+                                        )
+                                        listOf(
+                                            PageTemplate.BLANK to R.string.template_blank,
+                                            PageTemplate.RULED to R.string.template_ruled,
+                                            PageTemplate.GRID to R.string.template_grid,
+                                            PageTemplate.DOT to R.string.template_dot,
+                                        ).forEach { (template, label) ->
+                                            DropdownMenuItem(
+                                                text = {
+                                                    Text(
+                                                        stringResource(
+                                                            R.string.action_set_page_template,
+                                                            stringResource(label)
+                                                        )
+                                                    )
+                                                },
+                                                onClick = {
+                                                    menuExpanded = false
+                                                    onChangePageTemplate(page, template)
+                                                }
+                                            )
+                                        }
+                                        if (session.pageCount > 1) {
+                                            DropdownMenuItem(
+                                                text = { Text(stringResource(R.string.action_delete_page)) },
+                                                leadingIcon = {
+                                                    Icon(Icons.Default.Delete, contentDescription = null)
+                                                },
+                                                onClick = {
+                                                    menuExpanded = false
+                                                    onDeletePage(page)
+                                                }
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
