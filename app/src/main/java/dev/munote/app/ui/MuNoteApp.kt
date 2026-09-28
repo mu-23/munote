@@ -709,6 +709,7 @@ private fun ReaderScreen(
                         context = context,
                         session = session,
                         inkStore = inkStore,
+                        textStore = textStore,
                         destination = uri,
                         onProgress = { completed, total ->
                             exportCompleted = completed
