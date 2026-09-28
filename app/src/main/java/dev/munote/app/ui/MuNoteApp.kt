@@ -29,6 +29,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -98,6 +99,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
@@ -112,6 +114,7 @@ import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
@@ -1623,6 +1626,101 @@ private fun ToolButton(
         ) {
             icon()
             Text(label, style = MaterialTheme.typography.labelLarge)
+        }
+    }
+}
+
+@Composable
+private fun TextBoxLayer(
+    boxes: List<TextBoxNote>,
+    editable: Boolean,
+    activeTextBoxId: String?,
+    onActivate: (String) -> Unit,
+    onUpdate: (TextBoxNote) -> Unit,
+    onDelete: (String) -> Unit,
+) {
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        boxes.forEach { box ->
+            val focusRequester = remember(box.id) { FocusRequester() }
+            val keyboard = LocalSoftwareKeyboardController.current
+            var localText by remember(box.id, box.text) { mutableStateOf(box.text) }
+            val isActive = activeTextBoxId == box.id
+            val boxHeight = maxOf(56.dp, maxHeight * box.height)
+
+            LaunchedEffect(isActive, editable) {
+                if (isActive && editable) {
+                    focusRequester.requestFocus()
+                    keyboard?.show()
+                }
+            }
+
+            LaunchedEffect(localText) {
+                if (localText != box.text) {
+                    delay(350)
+                    onUpdate(box.copy(text = localText))
+                }
+            }
+
+            Surface(
+                modifier = Modifier
+                    .offset(
+                        x = maxWidth * box.x,
+                        y = maxHeight * box.y
+                    )
+                    .width(maxWidth * box.width)
+                    .height(boxHeight),
+                shape = RoundedCornerShape(8.dp),
+                color = if (editable) {
+                    MaterialTheme.colorScheme.surface.copy(alpha = 0.92f)
+                } else {
+                    Color.Transparent
+                },
+                border = when {
+                    isActive && editable ->
+                        BorderStroke(2.dp, MaterialTheme.colorScheme.primary)
+                    editable ->
+                        BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+                    else -> null
+                }
+            ) {
+                Box(Modifier.fillMaxSize()) {
+                    BasicTextField(
+                        value = localText,
+                        onValueChange = { localText = it },
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .focusRequester(focusRequester)
+                            .onFocusChanged {
+                                if (it.isFocused) onActivate(box.id)
+                            }
+                            .padding(
+                                start = 8.dp,
+                                top = 8.dp,
+                                end = if (editable) 32.dp else 8.dp,
+                                bottom = 8.dp
+                            ),
+                        readOnly = !editable,
+                        textStyle = MaterialTheme.typography.bodyLarge.copy(
+                            color = MaterialTheme.colorScheme.onSurface,
+                            fontSize = box.fontSizeSp.sp
+                        )
+                    )
+
+                    if (editable) {
+                        IconButton(
+                            onClick = { onDelete(box.id) },
+                            modifier = Modifier
+                                .align(Alignment.TopEnd)
+                                .size(30.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.Close,
+                                contentDescription = stringResource(R.string.cd_delete_text_box)
+                            )
+                        }
+                    }
+                }
+            }
         }
     }
 }
