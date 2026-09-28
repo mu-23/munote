@@ -55,6 +55,10 @@ class InkStore(context: Context, fingerprint: String) {
     }
 
     fun page(index: Int): List<InkStroke> = pages[index]?.toList().orEmpty()
+    fun pageIndices(): List<Int> = pages.entries
+        .filter { it.value.isNotEmpty() }
+        .map { it.key }
+        .sorted()
 
     fun canUndo(index: Int): Boolean = !undoStacks[index].isNullOrEmpty()
     fun canRedo(index: Int): Boolean = !redoStacks[index].isNullOrEmpty()
