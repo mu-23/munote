@@ -12,15 +12,17 @@ MuNote is a clean-room, local-first Android project aimed at combining a Notein-
 - Pressure + velocity-aware variable-width pen
 - Pen, highlighter, eraser, undo/redo
 - Stylus lasso selection with move, copy, resize, and delete
-- Finger-only pinch zoom, pan, and page swipe, separated from stylus input
-- PDF import with a persistent local document library
+- Pen/Touch modes: write with one finger when no stylus is available; use two fingers to pan/zoom
+- Three-finger inward pinch opens a full-page overview, with a shortcut back to the pre-jump location
+- PDF import with a persistent local document library and first-page cover grid
+- Custom cover images and marquee filenames below each cover
 - Resume at the last viewed page
 - Page thumbnails, persistent bookmarks, bookmark-only filtering, and direct page jump
 - On-device Simplified Chinese scanned-PDF OCR
 - Search scanned/image-only PDF text, jump to matches, and highlight the OCR region
 - On-device Chinese digital-ink recognition for the user’s own handwriting
-- Unified search across PDF OCR and handwritten ink
-- Flattened PDF export with handwritten annotations, progress, and cancellation
+- Typed text boxes for keyboard notes, included in unified PDF/handwriting/text search
+- Flattened PDF export with handwriting and typed text, progress, and cancellation
 - Rename/delete local library documents
 - OCR prioritization around the saved reading position for large scanned textbooks
 - No account required and no paid OCR API
