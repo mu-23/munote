@@ -2,6 +2,7 @@ package dev.munote.app.ui
 
 import android.graphics.Bitmap
 import android.net.Uri
+import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -42,6 +43,7 @@ import androidx.compose.material.icons.filled.ArrowForward
 import androidx.compose.material.icons.filled.Brush
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.FolderOpen
+import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.List
@@ -97,6 +99,7 @@ import dev.munote.app.ocr.OcrIndexStore
 import dev.munote.app.ocr.SearchHit
 import dev.munote.app.ocr.SearchSource
 import dev.munote.app.pdf.LibraryEntry
+import dev.munote.app.pdf.PdfExporter
 import dev.munote.app.pdf.PdfLibrary
 import dev.munote.app.pdf.PdfSession
 import kotlinx.coroutines.Dispatchers
