@@ -10,6 +10,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.background
@@ -1753,12 +1754,28 @@ private fun TextBoxLayer(
     onDelete: (String) -> Unit,
 ) {
     BoxWithConstraints(Modifier.fillMaxSize()) {
+        val density = LocalDensity.current
+        val pageWidthPx = with(density) { maxWidth.toPx() }.coerceAtLeast(1f)
+        val pageHeightPx = with(density) { maxHeight.toPx() }.coerceAtLeast(1f)
+
         boxes.forEach { box ->
             val focusRequester = remember(box.id) { FocusRequester() }
             val keyboard = LocalSoftwareKeyboardController.current
+            var localBox by remember(
+                box.id,
+                box.x,
+                box.y,
+                box.width,
+                box.height,
+                box.fontSizeSp
+            ) { mutableStateOf(box) }
             var localText by remember(box.id, box.text) { mutableStateOf(box.text) }
             val isActive = activeTextBoxId == box.id
-            val boxHeight = maxOf(56.dp, maxHeight * box.height)
+            val boxHeight = maxOf(56.dp, maxHeight * localBox.height)
+
+            fun persistGeometry() {
+                onUpdate(localBox.copy(text = localText))
+            }
 
             LaunchedEffect(isActive, editable) {
                 if (isActive && editable) {
@@ -1770,17 +1787,17 @@ private fun TextBoxLayer(
             LaunchedEffect(localText) {
                 if (localText != box.text) {
                     delay(350)
-                    onUpdate(box.copy(text = localText))
+                    onUpdate(localBox.copy(text = localText))
                 }
             }
 
             Surface(
                 modifier = Modifier
                     .offset(
-                        x = maxWidth * box.x,
-                        y = maxHeight * box.y
+                        x = maxWidth * localBox.x,
+                        y = maxHeight * localBox.y
                     )
-                    .width(maxWidth * box.width)
+                    .width(maxWidth * localBox.width)
                     .height(boxHeight),
                 shape = RoundedCornerShape(8.dp),
                 color = if (editable) {
@@ -1808,14 +1825,14 @@ private fun TextBoxLayer(
                             }
                             .padding(
                                 start = 8.dp,
-                                top = 8.dp,
+                                top = if (editable && isActive) 34.dp else 8.dp,
                                 end = if (editable) 32.dp else 8.dp,
-                                bottom = 8.dp
+                                bottom = if (editable && isActive) 28.dp else 8.dp
                             ),
                         readOnly = !editable,
                         textStyle = MaterialTheme.typography.bodyLarge.copy(
                             color = MaterialTheme.colorScheme.onSurface,
-                            fontSize = box.fontSizeSp.sp
+                            fontSize = localBox.fontSizeSp.sp
                         )
                     )
 
@@ -1830,6 +1847,107 @@ private fun TextBoxLayer(
                                 Icons.Default.Close,
                                 contentDescription = stringResource(R.string.cd_delete_text_box)
                             )
+                        }
+                    }
+
+                    if (editable && isActive) {
+                        Surface(
+                            modifier = Modifier
+                                .align(Alignment.TopStart)
+                                .padding(4.dp)
+                                .height(26.dp)
+                                .width(72.dp)
+                                .pointerInput(box.id, pageWidthPx, pageHeightPx) {
+                                    detectDragGestures(
+                                        onDragEnd = { persistGeometry() },
+                                        onDragCancel = {
+                                            localBox = box
+                                        }
+                                    ) { change, dragAmount ->
+                                        change.consume()
+                                        val dx = dragAmount.x / pageWidthPx
+                                        val dy = dragAmount.y / pageHeightPx
+                                        localBox = localBox.copy(
+                                            x = (localBox.x + dx)
+                                                .coerceIn(0f, (1f - localBox.width).coerceAtLeast(0f)),
+                                            y = (localBox.y + dy)
+                                                .coerceIn(0f, (1f - localBox.height).coerceAtLeast(0f)),
+                                        )
+                                    }
+                                },
+                            shape = CircleShape,
+                            color = MaterialTheme.colorScheme.primaryContainer
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Text(
+                                    "↕↔",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer
+                                )
+                            }
+                        }
+
+                        Row(
+                            modifier = Modifier
+                                .align(Alignment.BottomStart)
+                                .padding(start = 5.dp, bottom = 2.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(2.dp)
+                        ) {
+                            TextButton(
+                                onClick = {
+                                    localBox = localBox.copy(
+                                        fontSizeSp = (localBox.fontSizeSp - 2f).coerceAtLeast(10f)
+                                    )
+                                    persistGeometry()
+                                },
+                                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp)
+                            ) {
+                                Text("A−", style = MaterialTheme.typography.labelMedium)
+                            }
+                            TextButton(
+                                onClick = {
+                                    localBox = localBox.copy(
+                                        fontSizeSp = (localBox.fontSizeSp + 2f).coerceAtMost(42f)
+                                    )
+                                    persistGeometry()
+                                },
+                                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp)
+                            ) {
+                                Text("A+", style = MaterialTheme.typography.labelMedium)
+                            }
+                        }
+
+                        Surface(
+                            modifier = Modifier
+                                .align(Alignment.BottomEnd)
+                                .size(30.dp)
+                                .pointerInput(box.id, pageWidthPx, pageHeightPx) {
+                                    detectDragGestures(
+                                        onDragEnd = { persistGeometry() },
+                                        onDragCancel = { localBox = box }
+                                    ) { change, dragAmount ->
+                                        change.consume()
+                                        val dw = dragAmount.x / pageWidthPx
+                                        val dh = dragAmount.y / pageHeightPx
+                                        val maxWidth = (1f - localBox.x).coerceAtLeast(0.18f)
+                                        val maxHeight = (1f - localBox.y).coerceAtLeast(0.08f)
+                                        localBox = localBox.copy(
+                                            width = (localBox.width + dw).coerceIn(0.18f, maxWidth),
+                                            height = (localBox.height + dh).coerceIn(0.08f, maxHeight),
+                                        )
+                                    }
+                                },
+                            shape = CircleShape,
+                            color = MaterialTheme.colorScheme.primaryContainer
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Text(
+                                    "↘",
+                                    style = MaterialTheme.typography.labelLarge,
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer
+                                )
+                            }
                         }
                     }
                 }
