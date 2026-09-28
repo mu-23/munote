@@ -98,6 +98,54 @@ class InkStore(context: Context, fingerprint: String) {
         next
     }
 
+    suspend fun deletePage(index: Int) = withContext(Dispatchers.IO) {
+        val remapped = linkedMapOf<Int, MutableList<InkStroke>>()
+        pages.entries.sortedBy { it.key }.forEach { (page, strokes) ->
+            when {
+                page < index -> remapped[page] = strokes.toMutableList()
+                page > index -> remapped[page - 1] = strokes.toMutableList()
+            }
+        }
+        pages.clear()
+        pages.putAll(remapped)
+        undoStacks.clear()
+        redoStacks.clear()
+        persist()
+    }
+
+    suspend fun duplicatePage(index: Int) = withContext(Dispatchers.IO) {
+        val source = page(index)
+        val remapped = linkedMapOf<Int, MutableList<InkStroke>>()
+        pages.entries.sortedBy { it.key }.forEach { (page, strokes) ->
+            remapped[if (page > index) page + 1 else page] = strokes.toMutableList()
+        }
+        if (source.isNotEmpty()) remapped[index + 1] = source.toMutableList()
+        pages.clear()
+        pages.putAll(remapped.toSortedMap())
+        undoStacks.clear()
+        redoStacks.clear()
+        persist()
+    }
+
+    suspend fun movePage(fromIndex: Int, toIndex: Int) = withContext(Dispatchers.IO) {
+        if (fromIndex == toIndex) return@withContext
+        fun remap(page: Int): Int = when {
+            page == fromIndex -> toIndex
+            fromIndex < toIndex && page in (fromIndex + 1)..toIndex -> page - 1
+            fromIndex > toIndex && page in toIndex until fromIndex -> page + 1
+            else -> page
+        }
+        val moved = linkedMapOf<Int, MutableList<InkStroke>>()
+        pages.forEach { (page, strokes) ->
+            moved[remap(page)] = strokes.toMutableList()
+        }
+        pages.clear()
+        pages.putAll(moved.toSortedMap())
+        undoStacks.clear()
+        redoStacks.clear()
+        persist()
+    }
+
     private fun pushUndo(index: Int, snapshot: List<InkStroke>, clearRedo: Boolean = false) {
         val stack = undoStacks.getOrPut(index) { ArrayDeque() }
         stack.addLast(snapshot)

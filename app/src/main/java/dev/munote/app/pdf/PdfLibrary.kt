@@ -39,6 +39,7 @@ data class LibraryEntry(
     val kind: DocumentKind = DocumentKind.PDF,
     val pageTemplate: PageTemplate = PageTemplate.BLANK,
     val notePageCount: Int = 0,
+    val pageTemplates: List<PageTemplate> = emptyList(),
     val favorite: Boolean = false,
     val folderId: String? = null,
     val trashedAt: Long? = null,
@@ -136,6 +137,7 @@ class PdfLibrary(private val context: Context) {
                 kind = previous?.kind ?: DocumentKind.PDF,
                 pageTemplate = previous?.pageTemplate ?: PageTemplate.BLANK,
                 notePageCount = previous?.notePageCount ?: 0,
+                pageTemplates = previous?.pageTemplates ?: emptyList(),
                 favorite = previous?.favorite ?: false,
                 folderId = previous?.folderId,
                 trashedAt = previous?.trashedAt,
@@ -158,8 +160,7 @@ class PdfLibrary(private val context: Context) {
         }
         writeNotebookPdf(
             file = documentFile(fingerprint),
-            template = template,
-            pageCount = 1,
+            templates = listOf(template),
         )
         val entry = LibraryEntry(
             fingerprint = fingerprint,
@@ -169,6 +170,7 @@ class PdfLibrary(private val context: Context) {
             kind = DocumentKind.NOTE,
             pageTemplate = template,
             notePageCount = 1,
+            pageTemplates = listOf(template),
         )
         synchronized(this@PdfLibrary) {
             entries[fingerprint] = entry
@@ -185,15 +187,17 @@ class PdfLibrary(private val context: Context) {
             val current = synchronized(this@PdfLibrary) {
                 entries[entry.fingerprint] ?: entry
             }
-            val nextCount = current.notePageCount.coerceAtLeast(1) + 1
+            val templates = effectivePageTemplates(current).toMutableList().apply {
+                add(current.pageTemplate)
+            }
             writeNotebookPdf(
                 file = documentFile(current.fingerprint),
-                template = current.pageTemplate,
-                pageCount = nextCount,
+                templates = templates,
             )
             update(
                 current.copy(
-                    notePageCount = nextCount,
+                    notePageCount = templates.size,
+                    pageTemplates = templates,
                     lastOpenedAt = System.currentTimeMillis(),
                 )
             )
@@ -264,6 +268,142 @@ class PdfLibrary(private val context: Context) {
             }
             update(current.copy(trashedAt = null, lastOpenedAt = System.currentTimeMillis()))
         }
+
+    suspend fun deleteNotebookPage(entry: LibraryEntry, pageIndex: Int): LibraryEntry =
+        withContext(Dispatchers.IO) {
+            require(entry.kind == DocumentKind.NOTE) {
+                context.getString(R.string.error_not_notebook)
+            }
+            val current = synchronized(this@PdfLibrary) {
+                entries[entry.fingerprint] ?: entry
+            }
+            val templates = effectivePageTemplates(current).toMutableList()
+            require(templates.size > 1) { "A notebook must keep at least one page" }
+            require(pageIndex in templates.indices) { "Page out of range" }
+
+            templates.removeAt(pageIndex)
+            writeNotebookPdf(documentFile(current.fingerprint), templates)
+
+            val bookmarks = current.bookmarks.mapNotNull { page ->
+                when {
+                    page == pageIndex -> null
+                    page > pageIndex -> page - 1
+                    else -> page
+                }
+            }.toSet()
+            val lastPage = when {
+                current.lastPage > pageIndex -> current.lastPage - 1
+                current.lastPage == pageIndex -> pageIndex.coerceAtMost(templates.lastIndex)
+                else -> current.lastPage
+            }
+
+            update(
+                current.copy(
+                    notePageCount = templates.size,
+                    pageTemplates = templates,
+                    bookmarks = bookmarks,
+                    lastPage = lastPage.coerceIn(0, templates.lastIndex),
+                    lastOpenedAt = System.currentTimeMillis(),
+                )
+            )
+        }
+
+    suspend fun duplicateNotebookPage(entry: LibraryEntry, pageIndex: Int): LibraryEntry =
+        withContext(Dispatchers.IO) {
+            require(entry.kind == DocumentKind.NOTE) {
+                context.getString(R.string.error_not_notebook)
+            }
+            val current = synchronized(this@PdfLibrary) {
+                entries[entry.fingerprint] ?: entry
+            }
+            val templates = effectivePageTemplates(current).toMutableList()
+            require(pageIndex in templates.indices) { "Page out of range" }
+            templates.add(pageIndex + 1, templates[pageIndex])
+            writeNotebookPdf(documentFile(current.fingerprint), templates)
+
+            val bookmarks = current.bookmarks.map { page ->
+                if (page > pageIndex) page + 1 else page
+            }.toMutableSet()
+            if (pageIndex in current.bookmarks) bookmarks += pageIndex + 1
+
+            update(
+                current.copy(
+                    notePageCount = templates.size,
+                    pageTemplates = templates,
+                    bookmarks = bookmarks,
+                    lastPage = pageIndex + 1,
+                    lastOpenedAt = System.currentTimeMillis(),
+                )
+            )
+        }
+
+    suspend fun moveNotebookPage(
+        entry: LibraryEntry,
+        fromIndex: Int,
+        toIndex: Int,
+    ): LibraryEntry = withContext(Dispatchers.IO) {
+        require(entry.kind == DocumentKind.NOTE) {
+            context.getString(R.string.error_not_notebook)
+        }
+        val current = synchronized(this@PdfLibrary) {
+            entries[entry.fingerprint] ?: entry
+        }
+        val templates = effectivePageTemplates(current).toMutableList()
+        require(fromIndex in templates.indices && toIndex in templates.indices) {
+            "Page out of range"
+        }
+        if (fromIndex == toIndex) return@withContext current
+
+        val moved = templates.removeAt(fromIndex)
+        templates.add(toIndex, moved)
+        writeNotebookPdf(documentFile(current.fingerprint), templates)
+
+        fun remap(page: Int): Int = when {
+            page == fromIndex -> toIndex
+            fromIndex < toIndex && page in (fromIndex + 1)..toIndex -> page - 1
+            fromIndex > toIndex && page in toIndex until fromIndex -> page + 1
+            else -> page
+        }
+
+        update(
+            current.copy(
+                notePageCount = templates.size,
+                pageTemplates = templates,
+                bookmarks = current.bookmarks.map(::remap).toSet(),
+                lastPage = remap(current.lastPage).coerceIn(0, templates.lastIndex),
+                lastOpenedAt = System.currentTimeMillis(),
+            )
+        )
+    }
+
+    suspend fun setNotebookPageTemplate(
+        entry: LibraryEntry,
+        pageIndex: Int,
+        template: PageTemplate,
+    ): LibraryEntry = withContext(Dispatchers.IO) {
+        require(entry.kind == DocumentKind.NOTE) {
+            context.getString(R.string.error_not_notebook)
+        }
+        val current = synchronized(this@PdfLibrary) {
+            entries[entry.fingerprint] ?: entry
+        }
+        val templates = effectivePageTemplates(current).toMutableList()
+        require(pageIndex in templates.indices) { "Page out of range" }
+        if (templates[pageIndex] == template) return@withContext current
+
+        templates[pageIndex] = template
+        writeNotebookPdf(documentFile(current.fingerprint), templates)
+        update(
+            current.copy(
+                pageTemplates = templates,
+                notePageCount = templates.size,
+                lastOpenedAt = System.currentTimeMillis(),
+            )
+        )
+    }
+
+    fun pageTemplateAt(entry: LibraryEntry, pageIndex: Int): PageTemplate =
+        effectivePageTemplates(entry).getOrElse(pageIndex) { entry.pageTemplate }
 
     suspend fun touch(entry: LibraryEntry): LibraryEntry = withContext(Dispatchers.IO) {
         update(entry.copy(lastOpenedAt = System.currentTimeMillis()))
@@ -380,13 +520,13 @@ class PdfLibrary(private val context: Context) {
 
     private fun writeNotebookPdf(
         file: File,
-        template: PageTemplate,
-        pageCount: Int,
+        templates: List<PageTemplate>,
     ) {
+        val normalizedTemplates = templates.ifEmpty { listOf(PageTemplate.BLANK) }
         val temp = File(file.parentFile, file.name + ".tmp")
         val document = PdfDocument()
         try {
-            repeat(pageCount.coerceAtLeast(1)) { pageIndex ->
+            normalizedTemplates.forEachIndexed { pageIndex, template ->
                 val info = PdfDocument.PageInfo.Builder(
                     NOTE_PAGE_WIDTH,
                     NOTE_PAGE_HEIGHT,
@@ -459,6 +599,17 @@ class PdfLibrary(private val context: Context) {
                     y += step
                 }
             }
+        }
+    }
+
+    private fun effectivePageTemplates(entry: LibraryEntry): List<PageTemplate> {
+        val count = entry.notePageCount.coerceAtLeast(1)
+        if (entry.pageTemplates.size >= count) {
+            return entry.pageTemplates.take(count)
+        }
+        return buildList(count) {
+            addAll(entry.pageTemplates)
+            while (size < count) add(entry.pageTemplate)
         }
     }
 
