@@ -186,4 +186,20 @@
     <string name="eraser_pixel">局部橡皮</string>
     <string name="eraser_clear_page">清空本页</string>
 
+
+    <string name="navigation_title">目录·链接</string>
+    <string name="navigation_current_page">当前第 %1$d / %2$d 页</string>
+    <string name="action_add">添加</string>
+    <string name="action_add_outline">添加目录项</string>
+    <string name="action_add_link">添加跳页链接</string>
+    <string name="dialog_add_link_title">添加跳页链接</string>
+    <string name="link_label">链接名称</string>
+    <string name="link_target_page">跳转到第几页</string>
+    <string name="dialog_add_outline_title">添加目录项</string>
+    <string name="outline_title_label">章节名称</string>
+    <string name="outline_section">大纲 / 章节目录</string>
+    <string name="outline_empty">还没有目录项</string>
+    <string name="page_links_section">本页跳转链接</string>
+    <string name="page_links_empty">本页还没有跳转链接</string>
+
 </resources>

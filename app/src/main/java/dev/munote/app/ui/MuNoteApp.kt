@@ -144,6 +144,9 @@ import dev.munote.app.ink.InkCanvasView
 import dev.munote.app.ink.InkShape
 import dev.munote.app.ink.InkStore
 import dev.munote.app.ink.InkTool
+import dev.munote.app.navigation.NavigationStore
+import dev.munote.app.navigation.PageLink
+import dev.munote.app.navigation.OutlineEntry
 import dev.munote.app.handwriting.ChineseHandwritingRecognizer
 import dev.munote.app.handwriting.HandwritingIndexStore
 import dev.munote.app.handwriting.HandwritingModelState
@@ -183,6 +186,7 @@ fun MuNoteApp(initialPdf: Uri?) {
     var inkStore by remember { mutableStateOf<InkStore?>(null) }
     var textStore by remember { mutableStateOf<TextStore?>(null) }
     var imageStore by remember { mutableStateOf<ImageStore?>(null) }
+    var navigationStore by remember { mutableStateOf<NavigationStore?>(null) }
     var loadError by remember { mutableStateOf<String?>(null) }
     var ocrDone by remember { mutableIntStateOf(0) }
     var ocrRunning by remember { mutableStateOf(false) }
@@ -201,6 +205,7 @@ fun MuNoteApp(initialPdf: Uri?) {
         inkStore = InkStore(context, next.fingerprint)
         textStore = TextStore(context, next.fingerprint)
         imageStore = ImageStore(context, next.fingerprint)
+        navigationStore = NavigationStore(context, next.fingerprint)
         ocrDone = indexStore?.completedPages() ?: 0
         ocrRevision++
         libraryRevision++
@@ -243,6 +248,7 @@ fun MuNoteApp(initialPdf: Uri?) {
         inkStore = null
         textStore = null
         imageStore = null
+        navigationStore = null
         ocrDone = 0
         ocrRunning = false
         ocrRevision++
@@ -474,6 +480,7 @@ fun MuNoteApp(initialPdf: Uri?) {
             inkStore = inkStore!!,
             textStore = textStore!!,
             imageStore = imageStore!!,
+            navigationStore = navigationStore!!,
             ocrDone = ocrDone,
             ocrRunning = ocrRunning,
             ocrRevision = ocrRevision,
@@ -507,6 +514,7 @@ fun MuNoteApp(initialPdf: Uri?) {
                             inkStore?.deletePage(page)
                             textStore?.deletePage(page)
                             imageStore?.deletePage(page)
+                            navigationStore?.deletePage(page)
                             handwritingIndexStore?.deletePage(page)
                             session?.close()
                             session = null
@@ -527,6 +535,7 @@ fun MuNoteApp(initialPdf: Uri?) {
                             inkStore?.duplicatePage(page)
                             textStore?.duplicatePage(page)
                             imageStore?.duplicatePage(page)
+                            navigationStore?.duplicatePage(page)
                             handwritingIndexStore?.duplicatePage(page)
                             session?.close()
                             session = null
@@ -547,6 +556,7 @@ fun MuNoteApp(initialPdf: Uri?) {
                             inkStore?.movePage(from, to)
                             textStore?.movePage(from, to)
                             imageStore?.movePage(from, to)
+                            navigationStore?.movePage(from, to)
                             handwritingIndexStore?.movePage(from, to)
                             session?.close()
                             session = null
@@ -1460,6 +1470,7 @@ private fun ReaderScreen(
     inkStore: InkStore,
     textStore: TextStore,
     imageStore: ImageStore,
+    navigationStore: NavigationStore,
     ocrDone: Int,
     ocrRunning: Boolean,
     ocrRevision: Int,
@@ -1490,6 +1501,13 @@ private fun ReaderScreen(
     var handwritingRevision by remember { mutableIntStateOf(0) }
     var textRevision by remember { mutableIntStateOf(0) }
     var imageRevision by remember { mutableIntStateOf(0) }
+    var navigationRevision by remember { mutableIntStateOf(0) }
+    var showNavigationPanel by remember { mutableStateOf(false) }
+    var showAddLink by remember { mutableStateOf(false) }
+    var showAddOutline by remember { mutableStateOf(false) }
+    var newLinkLabel by remember { mutableStateOf("") }
+    var newLinkTarget by remember { mutableStateOf("") }
+    var newOutlineTitle by remember { mutableStateOf("") }
     var activeTextBoxId by remember { mutableStateOf<String?>(null) }
     var activeImageId by remember { mutableStateOf<String?>(null) }
     var activeInkView by remember { mutableStateOf<InkCanvasView?>(null) }
@@ -1740,6 +1758,129 @@ private fun ReaderScreen(
         )
     }
 
+    if (showAddLink) {
+        AlertDialog(
+            onDismissRequest = { showAddLink = false },
+            title = { Text(stringResource(R.string.dialog_add_link_title)) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    OutlinedTextField(
+                        value = newLinkLabel,
+                        onValueChange = { newLinkLabel = it },
+                        singleLine = true,
+                        label = { Text(stringResource(R.string.link_label)) }
+                    )
+                    OutlinedTextField(
+                        value = newLinkTarget,
+                        onValueChange = { newLinkTarget = it.filter(Char::isDigit).take(6) },
+                        singleLine = true,
+                        label = { Text(stringResource(R.string.link_target_page)) }
+                    )
+                }
+            },
+            confirmButton = {
+                val target = newLinkTarget.toIntOrNull()
+                TextButton(
+                    enabled = target != null && target in 1..session.pageCount,
+                    onClick = {
+                        val targetPage = (newLinkTarget.toIntOrNull() ?: 1) - 1
+                        scope.launch {
+                            navigationStore.addLink(
+                                sourcePage = pager.currentPage,
+                                targetPage = targetPage,
+                                label = newLinkLabel,
+                            )
+                            navigationRevision++
+                        }
+                        newLinkLabel = ""
+                        newLinkTarget = ""
+                        showAddLink = false
+                    }
+                ) {
+                    Text(stringResource(R.string.action_add))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showAddLink = false }) {
+                    Text(stringResource(R.string.action_cancel))
+                }
+            }
+        )
+    }
+
+    if (showAddOutline) {
+        AlertDialog(
+            onDismissRequest = { showAddOutline = false },
+            title = { Text(stringResource(R.string.dialog_add_outline_title)) },
+            text = {
+                OutlinedTextField(
+                    value = newOutlineTitle,
+                    onValueChange = { newOutlineTitle = it },
+                    singleLine = true,
+                    label = { Text(stringResource(R.string.outline_title_label)) }
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        scope.launch {
+                            navigationStore.addOutline(
+                                pageIndex = pager.currentPage,
+                                title = newOutlineTitle,
+                            )
+                            navigationRevision++
+                        }
+                        newOutlineTitle = ""
+                        showAddOutline = false
+                    }
+                ) {
+                    Text(stringResource(R.string.action_add))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showAddOutline = false }) {
+                    Text(stringResource(R.string.action_cancel))
+                }
+            }
+        )
+    }
+
+    if (showNavigationPanel) {
+        NavigationDialog(
+            currentPage = pager.currentPage,
+            pageCount = session.pageCount,
+            outline = remember(navigationRevision) { navigationStore.allOutline() },
+            pageLinks = remember(navigationRevision, pager.currentPage) {
+                navigationStore.linksForPage(pager.currentPage)
+            },
+            onDismiss = { showNavigationPanel = false },
+            onAddLink = {
+                newLinkTarget = (pager.currentPage + 1).toString()
+                showAddLink = true
+            },
+            onAddOutline = {
+                newOutlineTitle = ""
+                showAddOutline = true
+            },
+            onNavigate = { page ->
+                showNavigationPanel = false
+                scope.launch { jumpToPage(page) }
+            },
+            onDeleteLink = { id ->
+                scope.launch {
+                    navigationStore.deleteLink(id)
+                    navigationRevision++
+                }
+            },
+            onDeleteOutline = { id ->
+                scope.launch {
+                    navigationStore.deleteOutline(id)
+                    navigationRevision++
+                }
+            },
+        )
+    }
+
     if (showPageOverview) {
         PageOverviewDialog(
             session = session,
@@ -1795,6 +1936,13 @@ private fun ReaderScreen(
                         style = MaterialTheme.typography.labelLarge
                     )
                     LanguageMenu()
+                    TextButton(onClick = { showNavigationPanel = true }) {
+                        Text(
+                            stringResource(R.string.navigation_title),
+                            maxLines = 1,
+                            style = MaterialTheme.typography.labelMedium
+                        )
+                    }
                     IconButton(onClick = onOpenPdf) {
                         Icon(Icons.Default.FolderOpen, contentDescription = stringResource(R.string.cd_import_another_pdf))
                     }
@@ -1990,6 +2138,9 @@ private fun ReaderScreen(
                     textBoxes = remember(textRevision, page) { textStore.page(page) },
                     images = remember(imageRevision, page) { imageStore.page(page) },
                     imageStore = imageStore,
+                    links = remember(navigationRevision, page) {
+                        navigationStore.linksForPage(page)
+                    },
                     activeTextBoxId = activeTextBoxId,
                     activeImageId = activeImageId,
                     highlight = hits.getOrNull(selectedHit)?.takeIf { it.pageIndex == page },
@@ -2037,6 +2188,15 @@ private fun ReaderScreen(
                         }
                     },
                     onActivateImage = { id -> activeImageId = id },
+                    onNavigateLink = { target ->
+                        scope.launch { jumpToPage(target) }
+                    },
+                    onUpdateLink = { link ->
+                        scope.launch {
+                            navigationStore.updateLink(link)
+                            navigationRevision++
+                        }
+                    },
                     onViewReady = { view ->
                         if (page == pager.currentPage) activeInkView = view
                     },
@@ -3524,6 +3684,236 @@ private fun PageImageLayer(
 }
 
 @Composable
+private fun NavigationDialog(
+    currentPage: Int,
+    pageCount: Int,
+    outline: List<OutlineEntry>,
+    pageLinks: List<PageLink>,
+    onDismiss: () -> Unit,
+    onAddLink: () -> Unit,
+    onAddOutline: () -> Unit,
+    onNavigate: (Int) -> Unit,
+    onDeleteLink: (String) -> Unit,
+    onDeleteOutline: (String) -> Unit,
+) {
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth(0.86f)
+                .fillMaxHeight(0.78f),
+            shape = RoundedCornerShape(24.dp),
+            tonalElevation = 6.dp
+        ) {
+            Column(Modifier.fillMaxSize()) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 18.dp, vertical = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            stringResource(R.string.navigation_title),
+                            style = MaterialTheme.typography.titleLarge
+                        )
+                        Text(
+                            stringResource(
+                                R.string.navigation_current_page,
+                                currentPage + 1,
+                                pageCount
+                            ),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    TextButton(onClick = onDismiss) {
+                        Text(stringResource(R.string.action_close))
+                    }
+                }
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 14.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    AssistChip(
+                        onClick = onAddOutline,
+                        label = { Text(stringResource(R.string.action_add_outline)) }
+                    )
+                    AssistChip(
+                        onClick = onAddLink,
+                        label = { Text(stringResource(R.string.action_add_link)) }
+                    )
+                }
+
+                LazyColumn(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth(),
+                    contentPadding = PaddingValues(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    item {
+                        Text(
+                            stringResource(R.string.outline_section),
+                            modifier = Modifier.padding(vertical = 8.dp),
+                            style = MaterialTheme.typography.titleSmall
+                        )
+                    }
+
+                    if (outline.isEmpty()) {
+                        item {
+                            Text(
+                                stringResource(R.string.outline_empty),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                        }
+                    } else {
+                        items(
+                            count = outline.size,
+                            key = { "outline-" + outline[it].id }
+                        ) { index ->
+                            val entry = outline[index]
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                TextButton(
+                                    onClick = { onNavigate(entry.pageIndex) },
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Text(
+                                        "${entry.title} · ${entry.pageIndex + 1}",
+                                        modifier = Modifier.fillMaxWidth()
+                                    )
+                                }
+                                IconButton(onClick = { onDeleteOutline(entry.id) }) {
+                                    Icon(
+                                        Icons.Default.Delete,
+                                        contentDescription = stringResource(R.string.action_delete)
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    item {
+                        Text(
+                            stringResource(R.string.page_links_section),
+                            modifier = Modifier.padding(top = 16.dp, bottom = 8.dp),
+                            style = MaterialTheme.typography.titleSmall
+                        )
+                    }
+
+                    if (pageLinks.isEmpty()) {
+                        item {
+                            Text(
+                                stringResource(R.string.page_links_empty),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                        }
+                    } else {
+                        items(
+                            count = pageLinks.size,
+                            key = { "link-" + pageLinks[it].id }
+                        ) { index ->
+                            val link = pageLinks[index]
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                TextButton(
+                                    onClick = { onNavigate(link.targetPage) },
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Text(
+                                        "${link.label} → ${link.targetPage + 1}",
+                                        modifier = Modifier.fillMaxWidth()
+                                    )
+                                }
+                                IconButton(onClick = { onDeleteLink(link.id) }) {
+                                    Icon(
+                                        Icons.Default.Delete,
+                                        contentDescription = stringResource(R.string.action_delete)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun PageLinkLayer(
+    links: List<PageLink>,
+    onNavigate: (Int) -> Unit,
+    onUpdate: (PageLink) -> Unit,
+) {
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        val density = LocalDensity.current
+        val pageWidthPx = with(density) { maxWidth.toPx() }.coerceAtLeast(1f)
+        val pageHeightPx = with(density) { maxHeight.toPx() }.coerceAtLeast(1f)
+
+        links.forEach { link ->
+            var localLink by remember(link.id, link.x, link.y, link.width) {
+                mutableStateOf(link)
+            }
+
+            Surface(
+                onClick = { onNavigate(localLink.targetPage) },
+                modifier = Modifier
+                    .offset(
+                        x = maxWidth * localLink.x,
+                        y = maxHeight * localLink.y
+                    )
+                    .width(maxWidth * localLink.width)
+                    .pointerInput(link.id, pageWidthPx, pageHeightPx) {
+                        detectDragGesturesAfterLongPress(
+                            onDragEnd = { onUpdate(localLink) },
+                            onDragCancel = { localLink = link },
+                            onDrag = { change, dragAmount ->
+                                change.consume()
+                                localLink = localLink.copy(
+                                    x = (
+                                        localLink.x + dragAmount.x / pageWidthPx
+                                        ).coerceIn(
+                                            0f,
+                                            (1f - localLink.width).coerceAtLeast(0f)
+                                        ),
+                                    y = (
+                                        localLink.y + dragAmount.y / pageHeightPx
+                                        ).coerceIn(0f, 0.94f),
+                                )
+                            }
+                        )
+                    },
+                shape = RoundedCornerShape(10.dp),
+                color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.92f),
+                tonalElevation = 2.dp
+            ) {
+                Text(
+                    "↗ ${localLink.label}",
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer
+                )
+            }
+        }
+    }
+}
+
+@Composable
 private fun PdfInkPage(
     session: PdfSession,
     pageIndex: Int,
@@ -3532,6 +3922,7 @@ private fun PdfInkPage(
     textBoxes: List<TextBoxNote>,
     images: List<PageImageNote>,
     imageStore: ImageStore,
+    links: List<PageLink>,
     activeTextBoxId: String?,
     activeImageId: String?,
     highlight: SearchHit?,
@@ -3551,6 +3942,8 @@ private fun PdfInkPage(
     onUpdateImage: (PageImageNote) -> Unit,
     onDeleteImage: (String) -> Unit,
     onActivateImage: (String) -> Unit,
+    onNavigateLink: (Int) -> Unit,
+    onUpdateLink: (PageLink) -> Unit,
     onViewReady: (InkCanvasView) -> Unit,
     onSelectionChanged: (Boolean) -> Unit,
     onPageSwipe: (Int) -> Unit,
@@ -3873,6 +4266,12 @@ private fun PdfInkPage(
                     onActivate = onActivateTextBox,
                     onUpdate = onUpdateTextBox,
                     onDelete = onDeleteTextBox,
+                )
+
+                PageLinkLayer(
+                    links = links,
+                    onNavigate = onNavigateLink,
+                    onUpdate = onUpdateLink,
                 )
             }
         }

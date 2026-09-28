@@ -502,6 +502,7 @@ class PdfLibrary(private val context: Context) {
             File(File(context.filesDir, "handwriting-indexes"), "${entry.fingerprint}.json"),
             File(File(context.filesDir, "text-notes"), "${entry.fingerprint}.json"),
             File(File(context.filesDir, "image-notes"), "${entry.fingerprint}.json"),
+            File(File(context.filesDir, "navigation"), "${entry.fingerprint}.json"),
             File(File(context.filesDir, "images"), entry.fingerprint),
             File(File(context.filesDir, "links"), "${entry.fingerprint}.json"),
             File(File(context.filesDir, "outlines"), "${entry.fingerprint}.json"),
