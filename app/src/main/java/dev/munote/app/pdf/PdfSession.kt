@@ -18,17 +18,17 @@ import java.security.MessageDigest
 
 class PdfSession private constructor(
     val file: File,
-    val fingerprint: String,
+    override val fingerprint: String,
     private val descriptor: ParcelFileDescriptor,
     private val renderer: PdfRenderer,
-) : AutoCloseable {
-    val pageCount: Int = renderer.pageCount
+) : DocumentSession {
+    override val pageCount: Int = renderer.pageCount
     private val lock = Mutex()
     private val cache = object : LruCache<String, Bitmap>(24 * 1024 * 1024) {
         override fun sizeOf(key: String, value: Bitmap): Int = value.allocationByteCount
     }
 
-    suspend fun renderPage(index: Int, targetWidthPx: Int): Bitmap = withContext(Dispatchers.IO) {
+    override suspend fun renderPage(index: Int, targetWidthPx: Int): Bitmap = withContext(Dispatchers.IO) {
         val width = targetWidthPx.coerceIn(160, 2400)
         val key = "${index}:${width}"
         cache.get(key)?.takeIf { !it.isRecycled }?.let { return@withContext it }
@@ -50,7 +50,7 @@ class PdfSession private constructor(
         }
     }
 
-    fun clearRenderCache() {
+    override fun clearRenderCache() {
         cache.evictAll()
     }
 
