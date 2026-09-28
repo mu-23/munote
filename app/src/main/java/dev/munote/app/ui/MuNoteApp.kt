@@ -31,6 +31,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
@@ -49,6 +51,7 @@ import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.Gesture
+import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Language
@@ -58,6 +61,7 @@ import androidx.compose.material.icons.filled.Redo
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.StarBorder
+import androidx.compose.material.icons.filled.TouchApp
 import androidx.compose.material.icons.filled.Undo
 import androidx.compose.material.icons.filled.ZoomIn
 import androidx.compose.material.icons.filled.ZoomOut
@@ -103,6 +107,8 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import dev.munote.app.AppLanguage
 import dev.munote.app.R
 import dev.munote.app.ink.InkCanvasView
@@ -659,6 +665,11 @@ private fun ReaderScreen(
     var lassoSelectionActive by remember { mutableStateOf(false) }
     var showThumbnails by remember { mutableStateOf(false) }
     var showBookmarksOnly by remember { mutableStateOf(false) }
+    var showPageOverview by remember { mutableStateOf(false) }
+    var overviewOriginPage by remember { mutableIntStateOf(0) }
+    var previousLocation by remember { mutableStateOf<Int?>(null) }
+    val inputPrefs = remember { context.getSharedPreferences("editor_preferences", android.content.Context.MODE_PRIVATE) }
+    var fingerWriting by remember { mutableStateOf(inputPrefs.getBoolean("finger_writing", false)) }
     var showPageJump by remember { mutableStateOf(false) }
     var pageJumpText by remember { mutableStateOf("") }
     var showPenOptions by remember { mutableStateOf(false) }
@@ -711,10 +722,22 @@ private fun ReaderScreen(
     var penWidth by remember { mutableStateOf(2.15f) }
     var highlighterWidth by remember { mutableStateOf(12f) }
 
+    suspend fun jumpToPage(page: Int, rememberLocation: Boolean = true) {
+        val target = page.coerceIn(0, session.pageCount - 1)
+        if (target == pager.currentPage) return
+        if (rememberLocation) previousLocation = pager.currentPage
+        pager.animateScrollToPage(target)
+    }
+
     suspend fun goToHit(index: Int) {
         if (hits.isEmpty()) return
         selectedHit = ((index % hits.size) + hits.size) % hits.size
-        pager.animateScrollToPage(hits[selectedHit].pageIndex)
+        jumpToPage(hits[selectedHit].pageIndex)
+    }
+
+    fun openPageOverview() {
+        overviewOriginPage = pager.currentPage
+        showPageOverview = true
     }
 
     LaunchedEffect(session.fingerprint, handwritingModelState) {
@@ -771,7 +794,7 @@ private fun ReaderScreen(
                     enabled = target != null && target in 1..session.pageCount,
                     onClick = {
                         val page = (pageJumpText.toIntOrNull() ?: 1) - 1
-                        scope.launch { pager.animateScrollToPage(page) }
+                        scope.launch { jumpToPage(page) }
                         showPageJump = false
                     }
                 ) {
@@ -780,6 +803,20 @@ private fun ReaderScreen(
             },
             dismissButton = {
                 TextButton(onClick = { showPageJump = false }) { Text(stringResource(R.string.action_cancel)) }
+            }
+        )
+    }
+
+    if (showPageOverview) {
+        PageOverviewDialog(
+            session = session,
+            currentPage = pager.currentPage,
+            bookmarks = bookmarks,
+            onDismiss = { showPageOverview = false },
+            onSelectPage = { page ->
+                previousLocation = overviewOriginPage
+                showPageOverview = false
+                scope.launch { jumpToPage(page, rememberLocation = false) }
             }
         )
     }
@@ -981,7 +1018,7 @@ private fun ReaderScreen(
                     bookmarks = bookmarks,
                     showBookmarksOnly = showBookmarksOnly,
                     onPageClick = { page ->
-                        scope.launch { pager.animateScrollToPage(page) }
+                        scope.launch { jumpToPage(page) }
                     }
                 )
             }
@@ -1003,6 +1040,8 @@ private fun ReaderScreen(
                     inkColor = if (tool == InkTool.HIGHLIGHTER) highlighterColor else penColor,
                     penWidthDp = penWidth,
                     highlighterWidthDp = highlighterWidth,
+                    fingerWritingEnabled = fingerWriting,
+                    onShowPageOverview = ::openPageOverview,
                     onViewReady = { view ->
                         if (page == pager.currentPage) activeInkView = view
                     },
@@ -1059,6 +1098,36 @@ private fun ReaderScreen(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.Center
             ) {
+                ToolButton(
+                    selected = fingerWriting,
+                    label = if (fingerWriting) {
+                        stringResource(R.string.input_mode_finger)
+                    } else {
+                        stringResource(R.string.input_mode_pen)
+                    },
+                    icon = { Icon(Icons.Default.TouchApp, contentDescription = null) },
+                    onClick = {
+                        fingerWriting = !fingerWriting
+                        inputPrefs.edit().putBoolean("finger_writing", fingerWriting).apply()
+                    }
+                )
+                if (previousLocation != null) {
+                    Spacer(Modifier.width(6.dp))
+                    IconButton(
+                        onClick = {
+                            val target = previousLocation ?: return@IconButton
+                            val current = pager.currentPage
+                            previousLocation = current
+                            scope.launch { jumpToPage(target, rememberLocation = false) }
+                        }
+                    ) {
+                        Icon(
+                            Icons.Default.History,
+                            contentDescription = stringResource(R.string.cd_back_previous_location)
+                        )
+                    }
+                }
+                Spacer(Modifier.width(8.dp))
                 ToolButton(
                     selected = tool == InkTool.PEN,
                     label = stringResource(R.string.tool_pen),
@@ -1146,7 +1215,7 @@ private fun ReaderScreen(
                 IconButton(
                     onClick = {
                         scope.launch {
-                            pager.animateScrollToPage((pager.currentPage - 1).coerceAtLeast(0))
+                            jumpToPage((pager.currentPage - 1).coerceAtLeast(0), rememberLocation = false)
                         }
                     }
                 ) {
@@ -1169,8 +1238,9 @@ private fun ReaderScreen(
                 IconButton(
                     onClick = {
                         scope.launch {
-                            pager.animateScrollToPage(
-                                (pager.currentPage + 1).coerceAtMost(session.pageCount - 1)
+                            jumpToPage(
+                                (pager.currentPage + 1).coerceAtMost(session.pageCount - 1),
+                                rememberLocation = false
                             )
                         }
                     }
@@ -1443,6 +1513,8 @@ private fun PdfInkPage(
     inkColor: Int,
     penWidthDp: Float,
     highlighterWidthDp: Float,
+    fingerWritingEnabled: Boolean,
+    onShowPageOverview: () -> Unit,
     onViewReady: (InkCanvasView) -> Unit,
     onSelectionChanged: (Boolean) -> Unit,
     onPageSwipe: (Int) -> Unit,
@@ -1508,7 +1580,7 @@ private fun PdfInkPage(
             }
         }
 
-        val gestureModifier = Modifier.pointerInput(pageIndex) {
+        val gestureModifier = Modifier.pointerInput(pageIndex, fingerWritingEnabled) {
             awaitEachGesture {
                 val first = awaitFirstDown(requireUnconsumed = false)
 
@@ -1523,6 +1595,9 @@ private fun PdfInkPage(
                     }
 
                     var pinched = false
+                    var threeFingerGesture = false
+                    var overviewTriggered = false
+                    var threeFingerZoom = 1f
                     var dragX = 0f
                     var dragY = 0f
                     var pressed = true
@@ -1533,27 +1608,44 @@ private fun PdfInkPage(
                         pressed = down.isNotEmpty()
                         if (!pressed) break
 
-                        if (down.size >= 2) {
-                            pinched = true
-                            val zoomChange = event.calculateZoom()
-                            val panChange = event.calculatePan()
-                            applyTransform(zoomChange, panChange)
-                            event.changes.forEach { it.consume() }
-                        } else if (down.size == 1) {
-                            val change = down.first()
-                            val delta = change.positionChange()
-
-                            if (pinched || scale > 1.01f) {
-                                applyTransform(1f, delta)
-                            } else {
-                                dragX += delta.x
-                                dragY += delta.y
+                        when {
+                            down.size >= 3 -> {
+                                threeFingerGesture = true
+                                val zoomChange = event.calculateZoom()
+                                if (zoomChange.isFinite() && zoomChange > 0f) {
+                                    threeFingerZoom *= zoomChange
+                                }
+                                if (!overviewTriggered && threeFingerZoom < 0.72f) {
+                                    overviewTriggered = true
+                                    onShowPageOverview()
+                                }
+                                event.changes.forEach { it.consume() }
                             }
-                            change.consume()
+
+                            down.size == 2 -> {
+                                pinched = true
+                                val zoomChange = event.calculateZoom()
+                                val panChange = event.calculatePan()
+                                applyTransform(zoomChange, panChange)
+                                event.changes.forEach { it.consume() }
+                            }
+
+                            down.size == 1 && !fingerWritingEnabled -> {
+                                val change = down.first()
+                                val delta = change.positionChange()
+
+                                if (pinched || scale > 1.01f) {
+                                    applyTransform(1f, delta)
+                                } else {
+                                    dragX += delta.x
+                                    dragY += delta.y
+                                }
+                                change.consume()
+                            }
                         }
                     }
 
-                    if (!pinched && scale <= 1.01f) {
+                    if (!fingerWritingEnabled && !pinched && !threeFingerGesture && scale <= 1.01f) {
                         val thresholdPx = with(density) { 72.dp.toPx() }
                         if (abs(dragX) >= thresholdPx && abs(dragX) > abs(dragY) * 1.15f) {
                             onPageSwipe(if (dragX < 0f) 1 else -1)
@@ -1634,6 +1726,7 @@ private fun PdfInkPage(
                             this.inkColor = inkColor
                             this.penWidthDp = penWidthDp
                             this.highlighterWidthDp = highlighterWidthDp
+                            this.fingerWritingEnabled = fingerWritingEnabled
                             setStrokes(strokes)
                             onStrokeCommitted = onStroke
                             onPageMutated = onMutated
@@ -1646,6 +1739,7 @@ private fun PdfInkPage(
                         view.inkColor = inkColor
                         view.penWidthDp = penWidthDp
                         view.highlighterWidthDp = highlighterWidthDp
+                        view.fingerWritingEnabled = fingerWritingEnabled
                         view.onStrokeCommitted = onStroke
                         view.onPageMutated = onMutated
                         view.onSelectionChanged = onSelectionChanged
