@@ -17,6 +17,7 @@ data class LibraryEntry(
     val importedAt: Long,
     val lastOpenedAt: Long,
     val lastPage: Int = 0,
+    val bookmarks: Set<Int> = emptySet(),
 )
 
 @Serializable
@@ -78,6 +79,7 @@ class PdfLibrary(private val context: Context) {
                 importedAt = previous?.importedAt ?: now,
                 lastOpenedAt = now,
                 lastPage = previous?.lastPage ?: 0,
+                bookmarks = previous?.bookmarks ?: emptySet(),
             )
             synchronized(this@PdfLibrary) {
                 entries[fingerprint] = entry
@@ -106,6 +108,16 @@ class PdfLibrary(private val context: Context) {
                 entries[entry.fingerprint] ?: entry
             }
             update(current.copy(title = title))
+        }
+
+    suspend fun toggleBookmark(entry: LibraryEntry, pageIndex: Int): LibraryEntry =
+        withContext(Dispatchers.IO) {
+            val current = synchronized(this@PdfLibrary) {
+                entries[entry.fingerprint] ?: entry
+            }
+            val bookmarks = current.bookmarks.toMutableSet()
+            if (!bookmarks.add(pageIndex)) bookmarks.remove(pageIndex)
+            update(current.copy(bookmarks = bookmarks))
         }
 
     suspend fun delete(entry: LibraryEntry) = withContext(Dispatchers.IO) {
