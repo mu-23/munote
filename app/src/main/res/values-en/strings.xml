@@ -165,4 +165,14 @@
     <string name="image_unlock">Unlock image</string>
     <string name="image_delete">Delete image</string>
 
+
+    <string name="tool_shape">Shapes</string>
+    <string name="tool_ruler">Ruler</string>
+    <string name="shape_line">Line</string>
+    <string name="shape_rectangle">Rectangle</string>
+    <string name="shape_ellipse">Circle / ellipse</string>
+    <string name="shape_arrow">Arrow</string>
+    <string name="shape_triangle">Triangle</string>
+    <string name="ruler_hint">Ruler mode: drag to draw a straight line. The angle snaps to common 15° increments.</string>
+
 </resources>

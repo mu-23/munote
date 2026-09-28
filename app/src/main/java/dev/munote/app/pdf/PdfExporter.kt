@@ -11,6 +11,7 @@ import dev.munote.app.R
 import dev.munote.app.image.ImageStore
 import dev.munote.app.image.PageImageNote
 import dev.munote.app.ink.InkPoint
+import dev.munote.app.ink.InkShape
 import dev.munote.app.ink.InkStore
 import dev.munote.app.ink.InkStroke
 import dev.munote.app.text.TextBoxNote
@@ -19,8 +20,14 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
+import kotlin.math.PI
+import kotlin.math.atan2
+import kotlin.math.cos
 import kotlin.math.hypot
+import kotlin.math.max
+import kotlin.math.min
 import kotlin.math.pow
+import kotlin.math.sin
 
 /**
  * Exports the current document as a flattened PDF with MuNote ink baked into each page.
@@ -158,6 +165,13 @@ private object InkPdfRenderer {
         paint.color = stroke.colorArgb
         paint.alpha = if (stroke.highlighter) 82 else 255
         paint.style = Paint.Style.STROKE
+        paint.strokeCap = Paint.Cap.ROUND
+        paint.strokeJoin = Paint.Join.ROUND
+
+        if (stroke.shape != null && points.size >= 2) {
+            drawShape(canvas, stroke, pageWidth, pageHeight)
+            return
+        }
 
         if (points.size == 1) {
             paint.style = Paint.Style.FILL
@@ -239,6 +253,77 @@ private object InkPdfRenderer {
             pageHeight,
         )
         canvas.drawLine(fromX, fromY, last.x * pageWidth, last.y * pageHeight, paint)
+    }
+
+    private fun drawShape(
+        canvas: Canvas,
+        stroke: InkStroke,
+        pageWidth: Float,
+        pageHeight: Float,
+    ) {
+        val start = stroke.points.firstOrNull() ?: return
+        val end = stroke.points.lastOrNull() ?: return
+        val x1 = start.x * pageWidth
+        val y1 = start.y * pageHeight
+        val x2 = end.x * pageWidth
+        val y2 = end.y * pageHeight
+        val scale = minOf(pageWidth, pageHeight) / 850f
+        paint.strokeWidth = (stroke.baseWidthDp * scale).coerceAtLeast(1f)
+
+        when (stroke.shape) {
+            InkShape.LINE -> canvas.drawLine(x1, y1, x2, y2, paint)
+
+            InkShape.RECTANGLE -> canvas.drawRect(
+                min(x1, x2),
+                min(y1, y2),
+                max(x1, x2),
+                max(y1, y2),
+                paint,
+            )
+
+            InkShape.ELLIPSE -> canvas.drawOval(
+                RectF(
+                    min(x1, x2),
+                    min(y1, y2),
+                    max(x1, x2),
+                    max(y1, y2),
+                ),
+                paint,
+            )
+
+            InkShape.TRIANGLE -> {
+                val left = min(x1, x2)
+                val right = max(x1, x2)
+                val top = min(y1, y2)
+                val bottom = max(y1, y2)
+                path.reset()
+                path.moveTo((left + right) * 0.5f, top)
+                path.lineTo(right, bottom)
+                path.lineTo(left, bottom)
+                path.close()
+                canvas.drawPath(path, paint)
+            }
+
+            InkShape.ARROW -> {
+                canvas.drawLine(x1, y1, x2, y2, paint)
+                val dx = x2 - x1
+                val dy = y2 - y1
+                val length = hypot(dx, dy)
+                if (length > 1f) {
+                    val angle = atan2(dy.toDouble(), dx.toDouble())
+                    val head = min(28f * scale, length * 0.32f)
+                    val wingAngle = PI / 7.0
+                    val leftX = x2 - cos(angle - wingAngle).toFloat() * head
+                    val leftY = y2 - sin(angle - wingAngle).toFloat() * head
+                    val rightX = x2 - cos(angle + wingAngle).toFloat() * head
+                    val rightY = y2 - sin(angle + wingAngle).toFloat() * head
+                    canvas.drawLine(x2, y2, leftX, leftY, paint)
+                    canvas.drawLine(x2, y2, rightX, rightY, paint)
+                }
+            }
+
+            null -> Unit
+        }
     }
 
     private fun speedBetween(

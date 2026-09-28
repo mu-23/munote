@@ -139,6 +139,7 @@ import dev.munote.app.backup.LocalBackupManager
 import dev.munote.app.image.ImageStore
 import dev.munote.app.image.PageImageNote
 import dev.munote.app.ink.InkCanvasView
+import dev.munote.app.ink.InkShape
 import dev.munote.app.ink.InkStore
 import dev.munote.app.ink.InkTool
 import dev.munote.app.handwriting.ChineseHandwritingRecognizer
@@ -1572,6 +1573,7 @@ private fun ReaderScreen(
     var highlighterColor by remember { mutableIntStateOf(0xFFFFD54F.toInt()) }
     var penWidth by remember { mutableStateOf(2.15f) }
     var highlighterWidth by remember { mutableStateOf(12f) }
+    var selectedShape by remember { mutableStateOf(InkShape.LINE) }
 
     suspend fun jumpToPage(page: Int, rememberLocation: Boolean = true) {
         val target = page.coerceIn(0, session.pageCount - 1)
@@ -1929,6 +1931,7 @@ private fun ReaderScreen(
                     inkColor = if (tool == InkTool.HIGHLIGHTER) highlighterColor else penColor,
                     penWidthDp = penWidth,
                     highlighterWidthDp = highlighterWidth,
+                    shape = selectedShape,
                     fingerWritingEnabled = fingerWriting,
                     onShowPageOverview = ::openPageOverview,
                     onAddTextBox = { x, y ->
@@ -1993,6 +1996,14 @@ private fun ReaderScreen(
                     }
                 )
             }
+        }
+
+        if (tool == InkTool.SHAPE || tool == InkTool.RULER) {
+            ShapeOptionsBar(
+                tool = tool,
+                selectedShape = selectedShape,
+                onShapeSelected = { selectedShape = it },
+            )
         }
 
         if (tool == InkTool.IMAGE) {
@@ -2141,6 +2152,26 @@ private fun ReaderScreen(
                         tool = InkTool.IMAGE
                         showPenOptions = false
                         activeTextBoxId = null
+                    }
+                )
+                Spacer(Modifier.width(8.dp))
+                ToolButton(
+                    selected = tool == InkTool.SHAPE,
+                    label = stringResource(R.string.tool_shape),
+                    icon = { Text("△○") },
+                    onClick = {
+                        tool = InkTool.SHAPE
+                        showPenOptions = false
+                    }
+                )
+                Spacer(Modifier.width(8.dp))
+                ToolButton(
+                    selected = tool == InkTool.RULER,
+                    label = stringResource(R.string.tool_ruler),
+                    icon = { Text("╱") },
+                    onClick = {
+                        tool = InkTool.RULER
+                        showPenOptions = false
                     }
                 )
                 if (tool == InkTool.LASSO && lassoSelectionActive) {
@@ -2666,6 +2697,53 @@ private fun ColorSwatch(
         },
         content = {}
     )
+}
+
+@Composable
+private fun ShapeOptionsBar(
+    tool: InkTool,
+    selectedShape: InkShape,
+    onShapeSelected: (InkShape) -> Unit,
+) {
+    Surface(
+        tonalElevation = 2.dp,
+        color = MaterialTheme.colorScheme.surface
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState())
+                .padding(horizontal = 16.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            if (tool == InkTool.RULER) {
+                Text(
+                    stringResource(R.string.ruler_hint),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            } else {
+                listOf(
+                    InkShape.LINE to R.string.shape_line,
+                    InkShape.RECTANGLE to R.string.shape_rectangle,
+                    InkShape.ELLIPSE to R.string.shape_ellipse,
+                    InkShape.ARROW to R.string.shape_arrow,
+                    InkShape.TRIANGLE to R.string.shape_triangle,
+                ).forEach { (shape, label) ->
+                    AssistChip(
+                        onClick = { onShapeSelected(shape) },
+                        label = {
+                            Text(
+                                (if (selectedShape == shape) "✓ " else "") +
+                                    stringResource(label)
+                            )
+                        }
+                    )
+                }
+            }
+        }
+    }
 }
 
 @Composable
@@ -3207,6 +3285,7 @@ private fun PdfInkPage(
     inkColor: Int,
     penWidthDp: Float,
     highlighterWidthDp: Float,
+    shape: InkShape,
     fingerWritingEnabled: Boolean,
     onShowPageOverview: () -> Unit,
     onAddTextBox: (Float, Float) -> Unit,
@@ -3473,6 +3552,7 @@ private fun PdfInkPage(
                             this.inkColor = inkColor
                             this.penWidthDp = penWidthDp
                             this.highlighterWidthDp = highlighterWidthDp
+                            this.shape = shape
                             this.fingerWritingEnabled = fingerWritingEnabled
                             setStrokes(strokes)
                             onStrokeCommitted = onStroke
@@ -3486,6 +3566,7 @@ private fun PdfInkPage(
                         view.inkColor = inkColor
                         view.penWidthDp = penWidthDp
                         view.highlighterWidthDp = highlighterWidthDp
+                        view.shape = shape
                         view.fingerWritingEnabled = fingerWritingEnabled
                         view.onStrokeCommitted = onStroke
                         view.onPageMutated = onMutated
