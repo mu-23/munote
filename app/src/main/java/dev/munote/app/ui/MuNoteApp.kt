@@ -431,6 +431,7 @@ private fun ReaderScreen(
     onClose: () -> Unit,
     onOpenPdf: () -> Unit,
 ) {
+    val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val pager = rememberPagerState(pageCount = { session.pageCount })
     var query by remember { mutableStateOf("") }
@@ -442,6 +443,34 @@ private fun ReaderScreen(
     var handwritingRevision by remember { mutableIntStateOf(0) }
     var showThumbnails by remember { mutableStateOf(false) }
     var showPenOptions by remember { mutableStateOf(false) }
+    var exportRunning by remember { mutableStateOf(false) }
+
+    val exportLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/pdf")
+    ) { uri ->
+        if (uri != null) {
+            scope.launch {
+                exportRunning = true
+                try {
+                    PdfExporter.exportFlattened(
+                        context = context,
+                        session = session,
+                        inkStore = inkStore,
+                        destination = uri,
+                    )
+                    Toast.makeText(context, "已导出带批注 PDF", Toast.LENGTH_SHORT).show()
+                } catch (error: Throwable) {
+                    Toast.makeText(
+                        context,
+                        "导出失败：${error.message ?: "未知错误"}",
+                        Toast.LENGTH_LONG
+                    ).show()
+                } finally {
+                    exportRunning = false
+                }
+            }
+        }
+    }
 
     var penColor by remember { mutableIntStateOf(0xFF1C1D1F.toInt()) }
     var highlighterColor by remember { mutableIntStateOf(0xFFFFD54F.toInt()) }
@@ -508,6 +537,20 @@ private fun ReaderScreen(
                     )
                     IconButton(onClick = onOpenPdf) {
                         Icon(Icons.Default.FolderOpen, contentDescription = "导入另一个 PDF")
+                    }
+                    IconButton(
+                        enabled = !exportRunning,
+                        onClick = {
+                            exportLauncher.launch(
+                                documentTitle.take(80).ifBlank { "MuNote" } + "-批注.pdf"
+                            )
+                        }
+                    ) {
+                        if (exportRunning) {
+                            CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                        } else {
+                            Icon(Icons.Default.FileDownload, contentDescription = "导出带批注 PDF")
+                        }
                     }
                     IconButton(onClick = { showThumbnails = !showThumbnails }) {
                         Icon(Icons.Default.List, contentDescription = "页面缩略图")
