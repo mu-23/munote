@@ -111,25 +111,32 @@ However the repository currently exposes no root LICENSE file through GitHub. Th
 
 MuNote is a clean-room implementation. We are not copying Notein or TouchNotes code, and we are not importing source from repositories whose licensing is unclear.
 
-The first implementation combines the ideas that survived the comparison:
+The implementation now combines the ideas that survived the comparison:
 
 - native Android + Jetpack Compose shell;
-- custom Android View for the live ink surface;
+- custom Android View for the latency-sensitive ink surface;
 - stylus-only ink capture so fingers remain navigation gestures;
 - historical MotionEvent samples;
 - causal coordinate smoothing;
 - pressure + velocity width response;
 - Android PdfRenderer for local PDF rendering;
-- bundled/on-device ML Kit Chinese text recognizer for Chinese + Latin page OCR;
-- one OCR text record per page;
-- live keyword search against the page index;
-- search result chips jump directly to the matching page;
+- bundled/on-device ML Kit Chinese text recognition for scanned PDF pages;
+- positioned OCR blocks so search can jump and highlight the match;
+- ML Kit Digital Ink Recognition for the user's vector handwriting;
+- on-demand Simplified Chinese handwriting model (`zh-Hani-CN`);
+- handwriting recognition debounced outside the live ink path;
+- unified search across page OCR and handwritten ink;
+- lasso selection and vector-stroke movement;
+- local document library with resume page, bookmarks, rename and delete;
+- flattened annotated-PDF export;
 - handwriting stored separately from the original PDF so the source stays intact;
-- no account and no paid cloud OCR in the MVP.
+- no account and no paid cloud OCR in the current implementation.
+
+Google's current Digital Ink Recognition documentation states that the API supports hundreds of languages, downloads language models on demand, and recommends preserving natural stroke order and using writing-area context to improve recognition. MuNote therefore feeds its original vector stroke order to the recognizer and groups a page into approximate writing lines before recognition.
 
 ## What still needs device tuning
 
-A commercial pen feel cannot be recreated from source inspection alone. The final 10-20% depends on the digitizer and pen firmware of the actual tablet. The values that should be tuned from real writing samples are:
+A commercial pen feel cannot be recreated from source inspection alone. The final quality depends on the digitizer and pen firmware of the actual tablet. The values that should be tuned from real writing samples are:
 
 - coordinate smoothing factor;
 - pressure response exponent;
@@ -137,6 +144,14 @@ A commercial pen feel cannot be recreated from source inspection alone. The fina
 - velocity thinning cap;
 - pen-down/pen-up cap behavior;
 - eraser hit radius;
+- palm cancellation behavior;
 - whether Xiaomi/Redmi stylus side buttons need model-specific mapping.
 
-The code intentionally keeps these parameters simple so they can be tuned quickly after the first APK is tested on the target tablet.
+The code intentionally keeps these parameters isolated enough to tune quickly after the next APK is tested on the target tablet.
+
+## Remaining research questions
+
+- Whether a native blank-notebook page model should share a generic page-source interface with PDF documents or use a separate document engine.
+- How best to preserve original PDF vectors/text while exporting editable MuNote ink without introducing a heavyweight PDF dependency.
+- Whether handwritten Chinese recognition improves enough with line segmentation, writing-area hints and pre-context to justify automatic indexing of every page.
+- How aggressively background OCR can run on large 300-800 page textbooks without hurting battery, thermals or live ink latency.
