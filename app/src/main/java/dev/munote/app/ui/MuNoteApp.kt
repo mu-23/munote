@@ -4,6 +4,7 @@ import android.graphics.Bitmap
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
@@ -32,6 +33,8 @@ import androidx.compose.material.icons.filled.ArrowForward
 import androidx.compose.material.icons.filled.Brush
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.FolderOpen
+import androidx.compose.material.icons.filled.KeyboardArrowLeft
+import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Undo
 import androidx.compose.material3.AssistChip
@@ -57,6 +60,9 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -123,13 +129,13 @@ fun MuNoteApp(initialPdf: Uri?) {
         ocrRunning = true
         try {
             for (page in 0 until pdf.pageCount) {
-                if (store.hasPage(page)) {
+                if (!store.needsRefresh(page)) {
                     ocrDone = store.completedPages()
                     continue
                 }
                 val bitmap = pdf.renderPage(page, 1500)
-                val text = engine.recognize(bitmap)
-                store.put(page, text)
+                val recognition = engine.recognize(bitmap)
+                store.put(page, recognition)
                 ocrDone = store.completedPages()
                 ocrRevision++
             }
@@ -210,11 +216,19 @@ private fun ReaderScreen(
     val pager = rememberPagerState(pageCount = { session.pageCount })
     var query by remember { mutableStateOf("") }
     var hits by remember { mutableStateOf<List<SearchHit>>(emptyList()) }
+    var selectedHit by remember { mutableIntStateOf(0) }
     var tool by remember { mutableStateOf(InkTool.PEN) }
     var inkRevision by remember { mutableIntStateOf(0) }
 
+    suspend fun goToHit(index: Int) {
+        if (hits.isEmpty()) return
+        selectedHit = ((index % hits.size) + hits.size) % hits.size
+        pager.animateScrollToPage(hits[selectedHit].pageIndex)
+    }
+
     LaunchedEffect(query, ocrRevision) {
         hits = indexStore.search(query)
+        selectedHit = selectedHit.coerceIn(0, (hits.size - 1).coerceAtLeast(0))
     }
 
     Column(
@@ -229,20 +243,35 @@ private fun ReaderScreen(
                         .fillMaxWidth()
                         .padding(horizontal = 12.dp, vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     IconButton(onClick = onOpenPdf) {
                         Icon(Icons.Default.FolderOpen, contentDescription = "打开 PDF")
                     }
                     OutlinedTextField(
                         value = query,
-                        onValueChange = { query = it },
+                        onValueChange = {
+                            query = it
+                            selectedHit = 0
+                        },
                         modifier = Modifier.weight(1f),
                         singleLine = true,
-                        placeholder = { Text("搜索 PDF 图片里的文字") },
+                        placeholder = { Text("搜索扫描 PDF 里的文字") },
                         leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
                         shape = RoundedCornerShape(18.dp)
                     )
+                    if (hits.isNotEmpty()) {
+                        IconButton(onClick = { scope.launch { goToHit(selectedHit - 1) } }) {
+                            Icon(Icons.Default.KeyboardArrowLeft, contentDescription = "上一个搜索结果")
+                        }
+                        Text(
+                            "${selectedHit + 1}/${hits.size}",
+                            style = MaterialTheme.typography.labelMedium
+                        )
+                        IconButton(onClick = { scope.launch { goToHit(selectedHit + 1) } }) {
+                            Icon(Icons.Default.KeyboardArrowRight, contentDescription = "下一个搜索结果")
+                        }
+                    }
                     if (ocrRunning) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
@@ -273,9 +302,9 @@ private fun ReaderScreen(
                                 .padding(horizontal = 12.dp, vertical = 4.dp),
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            hits.forEach { hit ->
+                            hits.forEachIndexed { index, hit ->
                                 AssistChip(
-                                    onClick = { scope.launch { pager.animateScrollToPage(hit.pageIndex) } },
+                                    onClick = { scope.launch { goToHit(index) } },
                                     label = {
                                         Text(
                                             "第 ${hit.pageIndex + 1} 页 · ${hit.snippet}",
@@ -302,6 +331,7 @@ private fun ReaderScreen(
                 pageIndex = page,
                 tool = tool,
                 strokes = remember(inkRevision, page) { inkStore.page(page) },
+                highlight = hits.getOrNull(selectedHit)?.takeIf { it.pageIndex == page },
                 onStroke = { stroke ->
                     scope.launch {
                         inkStore.append(page, stroke)
@@ -421,6 +451,7 @@ private fun PdfInkPage(
     pageIndex: Int,
     tool: InkTool,
     strokes: List<dev.munote.app.ink.InkStroke>,
+    highlight: SearchHit?,
     onStroke: (dev.munote.app.ink.InkStroke) -> Unit,
     onMutated: (List<dev.munote.app.ink.InkStroke>) -> Unit,
 ) {
@@ -454,7 +485,7 @@ private fun PdfInkPage(
             modifier = pageModifier,
             shadowElevation = 3.dp,
             shape = RoundedCornerShape(4.dp),
-            color = androidx.compose.ui.graphics.Color.White
+            color = Color.White
         ) {
             Box(Modifier.fillMaxSize()) {
                 Image(
@@ -463,6 +494,34 @@ private fun PdfInkPage(
                     modifier = Modifier.fillMaxSize(),
                     contentScale = ContentScale.FillBounds
                 )
+
+                val rect = highlight?.rect
+                if (rect != null) {
+                    Canvas(Modifier.fillMaxSize()) {
+                        val left = rect.left * size.width
+                        val top = rect.top * size.height
+                        val right = rect.right * size.width
+                        val bottom = rect.bottom * size.height
+                        drawRect(
+                            color = Color(0x66FFD54F),
+                            topLeft = Offset(left, top),
+                            size = Size(
+                                (right - left).coerceAtLeast(2f),
+                                (bottom - top).coerceAtLeast(2f)
+                            )
+                        )
+                        drawRect(
+                            color = Color(0xCCF59E0B),
+                            topLeft = Offset(left, top),
+                            size = Size(
+                                (right - left).coerceAtLeast(2f),
+                                (bottom - top).coerceAtLeast(2f)
+                            ),
+                            style = androidx.compose.ui.graphics.drawscope.Stroke(width = 2.dp.toPx())
+                        )
+                    }
+                }
+
                 AndroidView(
                     factory = { ctx ->
                         InkCanvasView(ctx).apply {
