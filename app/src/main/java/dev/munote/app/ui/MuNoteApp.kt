@@ -43,6 +43,7 @@ import androidx.compose.material.icons.filled.ArrowForward
 import androidx.compose.material.icons.filled.Brush
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.FolderOpen
@@ -57,6 +58,8 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.StarBorder
 import androidx.compose.material.icons.filled.Undo
+import androidx.compose.material.icons.filled.ZoomIn
+import androidx.compose.material.icons.filled.ZoomOut
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.CircularProgressIndicator
@@ -602,6 +605,8 @@ private fun ReaderScreen(
     var tool by remember { mutableStateOf(InkTool.PEN) }
     var inkRevision by remember { mutableIntStateOf(0) }
     var handwritingRevision by remember { mutableIntStateOf(0) }
+    var activeInkView by remember { mutableStateOf<InkCanvasView?>(null) }
+    var lassoSelectionActive by remember { mutableStateOf(false) }
     var showThumbnails by remember { mutableStateOf(false) }
     var showBookmarksOnly by remember { mutableStateOf(false) }
     var showPageJump by remember { mutableStateOf(false) }
@@ -688,6 +693,8 @@ private fun ReaderScreen(
     }
 
     LaunchedEffect(pager.currentPage) {
+        lassoSelectionActive = false
+        activeInkView = null
         onPageChanged(pager.currentPage)
     }
 
@@ -930,6 +937,12 @@ private fun ReaderScreen(
                     inkColor = if (tool == InkTool.HIGHLIGHTER) highlighterColor else penColor,
                     penWidthDp = penWidth,
                     highlighterWidthDp = highlighterWidth,
+                    onViewReady = { view ->
+                        if (page == pager.currentPage) activeInkView = view
+                    },
+                    onSelectionChanged = { selected ->
+                        if (page == pager.currentPage) lassoSelectionActive = selected
+                    },
                     onPageSwipe = { direction ->
                         scope.launch {
                             pager.animateScrollToPage(
@@ -1025,6 +1038,21 @@ private fun ReaderScreen(
                         showPenOptions = false
                     }
                 )
+                if (tool == InkTool.LASSO && lassoSelectionActive) {
+                    Spacer(Modifier.width(6.dp))
+                    IconButton(onClick = { activeInkView?.duplicateSelection() }) {
+                        Icon(Icons.Default.ContentCopy, contentDescription = "复制选中笔迹")
+                    }
+                    IconButton(onClick = { activeInkView?.scaleSelection(0.9f) }) {
+                        Icon(Icons.Default.ZoomOut, contentDescription = "缩小选中笔迹")
+                    }
+                    IconButton(onClick = { activeInkView?.scaleSelection(1.1f) }) {
+                        Icon(Icons.Default.ZoomIn, contentDescription = "放大选中笔迹")
+                    }
+                    IconButton(onClick = { activeInkView?.deleteSelection() }) {
+                        Icon(Icons.Default.Delete, contentDescription = "删除选中笔迹")
+                    }
+                }
                 Spacer(Modifier.width(14.dp))
                 IconButton(
                     enabled = inkStore.canUndo(pager.currentPage),
@@ -1345,6 +1373,8 @@ private fun PdfInkPage(
     inkColor: Int,
     penWidthDp: Float,
     highlighterWidthDp: Float,
+    onViewReady: (InkCanvasView) -> Unit,
+    onSelectionChanged: (Boolean) -> Unit,
     onPageSwipe: (Int) -> Unit,
     onStroke: (dev.munote.app.ink.InkStroke) -> Unit,
     onMutated: (List<dev.munote.app.ink.InkStroke>) -> Unit,
@@ -1537,6 +1567,8 @@ private fun PdfInkPage(
                             setStrokes(strokes)
                             onStrokeCommitted = onStroke
                             onPageMutated = onMutated
+                            this.onSelectionChanged = onSelectionChanged
+                            onViewReady(this)
                         }
                     },
                     update = { view ->
@@ -1546,6 +1578,8 @@ private fun PdfInkPage(
                         view.highlighterWidthDp = highlighterWidthDp
                         view.onStrokeCommitted = onStroke
                         view.onPageMutated = onMutated
+                        view.onSelectionChanged = onSelectionChanged
+                        onViewReady(view)
                         if (view.snapshot() != strokes) view.setStrokes(strokes)
                     },
                     modifier = Modifier.fillMaxSize()
