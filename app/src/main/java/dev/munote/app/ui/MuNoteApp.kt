@@ -227,10 +227,26 @@ fun MuNoteApp(initialPdf: Uri?) {
     LaunchedEffect(session?.fingerprint) {
         val pdf = session ?: return@LaunchedEffect
         val store = indexStore ?: return@LaunchedEffect
+        val anchor = (currentEntry?.lastPage ?: 0)
+            .coerceIn(0, (pdf.pageCount - 1).coerceAtLeast(0))
+
+        // Large scanned textbooks should become useful around the page the user is actually
+        // reading before the app spends time indexing hundreds of earlier/later pages.
+        val pageOrder = buildList {
+            if (pdf.pageCount > 0) add(anchor)
+            for (distance in 1 until pdf.pageCount) {
+                val left = anchor - distance
+                val right = anchor + distance
+                if (left >= 0) add(left)
+                if (right < pdf.pageCount) add(right)
+                if (size >= pdf.pageCount) break
+            }
+        }
+
         val engine = ChineseOcrEngine()
         ocrRunning = true
         try {
-            for (page in 0 until pdf.pageCount) {
+            for (page in pageOrder) {
                 if (!store.needsRefresh(page)) {
                     ocrDone = store.completedPages()
                     continue
