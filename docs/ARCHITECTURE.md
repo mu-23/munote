@@ -35,6 +35,8 @@ PDF page
 
 Existing early indexes that contained only plain page text are migrated and refreshed with positioned OCR data.
 
+For large documents, background OCR starts at the saved resume page and expands outward so the current study region becomes searchable before distant pages.
+
 ## Handwriting flow
 
 Stylus MotionEvent
@@ -82,6 +84,7 @@ Stylus lasso
 -> dashed selection bounds
 -> stylus drag inside bounds
 -> normalized translation of selected vector strokes
+-> optional duplicate / scale / delete actions
 -> one persisted page mutation
 -> one undo/redo history step
 
@@ -94,6 +97,7 @@ Finger navigation remains separate.
 original page rendered locally
 -> draw stored vector ink over the page
 -> write through Android `PdfDocument`
+-> page-by-page progress callback with coroutine cancellation checks
 -> user chooses the destination with the system document picker
 
 The source document is untouched.
@@ -119,6 +123,7 @@ A future exporter can preserve/searchable OCR text as an actual PDF text layer i
 
 - `pdf/PdfExporter.kt`
   - flattened annotated-PDF export
+  - progress reporting + cancellation
 
 - `ocr/OcrIndex.kt`
   - bundled Chinese page OCR
@@ -141,14 +146,15 @@ A future exporter can preserve/searchable OCR text as an actual PDF text layer i
   - low-latency stylus input
   - pressure/speed response
   - pen/highlighter/eraser
-  - lasso selection + move
+  - lasso selection + move/copy/resize/delete
 
 - `ui/MuNoteApp.kt`
   - local library
   - compact tablet editor
   - search navigation
   - PDF pager + handwriting overlay
-  - thumbnails/bookmarks
+  - thumbnails/bookmarks + bookmark-only filtering
+  - direct page-number jump
   - finger zoom/pan
   - pen presets
   - export action
@@ -180,19 +186,16 @@ Desired capabilities:
 ### P3 — export/search quality
 - preserve original PDF vector/text quality when exporting;
 - optional searchable OCR text layer in exported PDFs;
-- page-by-page export progress and cancellation;
+- benchmark/cap flattened export memory use on large textbooks;
 - benchmark output size on large textbooks.
 
 ### P4 — editor polish
-- lasso delete/copy/resize in addition to move;
+- add selection handles for freeform lasso resize/rotation;
 - more pen nib types;
 - favorites/recent colors;
-- direct page-number jump;
-- optional bookmark-only page list;
 - more compact landscape/tablet layouts.
 
 ### P5 — large-document performance
-- prioritize OCR around the current page;
 - pause/resume background OCR;
 - battery/thermal-aware scheduling;
 - benchmark 300-800 page scanned textbooks;
