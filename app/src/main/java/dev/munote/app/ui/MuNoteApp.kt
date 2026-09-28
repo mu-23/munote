@@ -819,8 +819,7 @@ private fun PdfInkPage(
 
         val gestureModifier = Modifier.pointerInput(pageIndex) {
             awaitEachGesture {
-                awaitPointerEventScope {
-                    val first = awaitFirstDown(requireUnconsumed = false)
+                val first = awaitFirstDown(requireUnconsumed = false)
 
                     // Stylus/eraser input is owned by InkCanvasView. This recognizer is finger-only.
                     if (first.type != PointerType.Touch) {
@@ -829,7 +828,7 @@ private fun PdfInkPage(
                             val event = awaitPointerEvent(PointerEventPass.Final)
                             pressed = event.changes.any { it.pressed }
                         }
-                        return@awaitPointerEventScope
+                        return@awaitEachGesture
                     }
 
                     var pinched = false
@@ -870,12 +869,11 @@ private fun PdfInkPage(
                         }
                     }
 
-                    if (scale <= 1.01f) {
-                        scale = 1f
-                        pan = Offset.Zero
-                    } else {
-                        pan = clampPan(pan, scale)
-                    }
+                if (scale <= 1.01f) {
+                    scale = 1f
+                    pan = Offset.Zero
+                } else {
+                    pan = clampPan(pan, scale)
                 }
             }
         }
