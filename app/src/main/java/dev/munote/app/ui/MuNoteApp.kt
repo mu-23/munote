@@ -125,6 +125,8 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import dev.munote.app.AppLanguage
 import dev.munote.app.R
+import dev.munote.app.backup.LocalBackupInfo
+import dev.munote.app.backup.LocalBackupManager
 import dev.munote.app.ink.InkCanvasView
 import dev.munote.app.ink.InkStore
 import dev.munote.app.ink.InkTool
@@ -137,6 +139,7 @@ import dev.munote.app.ocr.SearchHit
 import dev.munote.app.ocr.SearchSource
 import dev.munote.app.pdf.DocumentKind
 import dev.munote.app.pdf.LibraryEntry
+import dev.munote.app.pdf.LibraryFolder
 import dev.munote.app.pdf.PageTemplate
 import dev.munote.app.pdf.PdfExporter
 import dev.munote.app.pdf.PdfLibrary
@@ -156,6 +159,7 @@ fun MuNoteApp(initialPdf: Uri?) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val library = remember { PdfLibrary(context) }
+    val backupManager = remember { LocalBackupManager(context) }
     val handwritingRecognizer = remember { ChineseHandwritingRecognizer(context) }
 
     var session by remember { mutableStateOf<PdfSession?>(null) }
@@ -170,6 +174,7 @@ fun MuNoteApp(initialPdf: Uri?) {
     var ocrRevision by remember { mutableIntStateOf(0) }
     var handwritingModelState by remember { mutableStateOf(HandwritingModelState.NOT_READY) }
     var libraryRevision by remember { mutableIntStateOf(0) }
+    var backupRevision by remember { mutableIntStateOf(0) }
     var coverTarget by remember { mutableStateOf<LibraryEntry?>(null) }
 
     fun attachSession(next: PdfSession, entry: LibraryEntry) {
@@ -259,6 +264,9 @@ fun MuNoteApp(initialPdf: Uri?) {
     }
 
     LaunchedEffect(Unit) {
+        runCatching { backupManager.autoBackupIfDue() }
+            .onSuccess { backupRevision++ }
+
         handwritingModelState = if (handwritingRecognizer.isReady()) {
             HandwritingModelState.READY
         } else {
