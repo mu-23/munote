@@ -31,7 +31,7 @@
     <string name="action_set_cover">Custom cover</string>
     <string name="action_reset_cover">Use first page as cover</string>
     <string name="dialog_delete_title">Delete this document?</string>
-    <string name="dialog_delete_message">This removes MuNote&apos;s local document, handwriting, text boxes, and recognition indexes. An imported PDF&apos;s original source file is not affected.</string>
+    <string name="dialog_delete_message">This removes the local MuNote document, handwriting, text boxes, and recognition indexes. The original source file of an imported PDF is not affected.</string>
     <string name="dialog_new_notebook_title">New note</string>
     <string name="label_notebook_name">Note name</string>
     <string name="label_page_template">Page template</string>
