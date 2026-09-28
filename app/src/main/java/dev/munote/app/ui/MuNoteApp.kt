@@ -517,7 +517,7 @@ private fun ReaderScreen(
                         },
                         modifier = Modifier.weight(1f),
                         singleLine = true,
-                        placeholder = { Text("搜索扫描 PDF 里的文字") },
+                        placeholder = { Text("搜索 PDF 和手写内容") },
                         leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
                         shape = RoundedCornerShape(18.dp)
                     )
@@ -545,12 +545,30 @@ private fun ReaderScreen(
                             )
                         }
                     }
+                    when (handwritingModelState) {
+                        HandwritingModelState.DOWNLOADING -> Text(
+                            "手写模型下载中",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            style = MaterialTheme.typography.labelSmall
+                        )
+                        HandwritingModelState.ERROR -> Text(
+                            "手写识别不可用",
+                            color = MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.labelSmall
+                        )
+                        else -> Unit
+                    }
                 }
 
                 if (query.isNotBlank()) {
                     if (hits.isEmpty()) {
                         Text(
-                            if (ocrRunning) "正在继续识别，当前暂无匹配" else "没有找到",
+                            when {
+                                ocrRunning -> "正在继续识别 PDF，当前暂无匹配"
+                                handwritingModelState == HandwritingModelState.DOWNLOADING ->
+                                    "手写识别模型下载中，PDF 搜索仍可用"
+                                else -> "没有找到"
+                            },
                             modifier = Modifier.padding(horizontal = 18.dp, vertical = 5.dp),
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             style = MaterialTheme.typography.bodySmall
@@ -567,8 +585,10 @@ private fun ReaderScreen(
                                 AssistChip(
                                     onClick = { scope.launch { goToHit(index) } },
                                     label = {
+                                        val sourceLabel =
+                                            if (hit.source == SearchSource.HANDWRITING) "手写" else "PDF"
                                         Text(
-                                            "第 ${hit.pageIndex + 1} 页 · ${hit.snippet}",
+                                            "第 ${hit.pageIndex + 1} 页 · $sourceLabel · ${hit.snippet}",
                                             maxLines = 1
                                         )
                                     }
