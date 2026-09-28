@@ -702,6 +702,17 @@ private fun ReaderScreen(
                     IconButton(onClick = { showThumbnails = !showThumbnails }) {
                         Icon(Icons.Default.List, contentDescription = "页面缩略图")
                     }
+                    IconButton(onClick = { onToggleBookmark(pager.currentPage) }) {
+                        Icon(
+                            if (pager.currentPage in bookmarks) Icons.Default.Star
+                            else Icons.Default.StarBorder,
+                            contentDescription = if (pager.currentPage in bookmarks) {
+                                "取消书签"
+                            } else {
+                                "添加书签"
+                            }
+                        )
+                    }
                     OutlinedTextField(
                         value = query,
                         onValueChange = {
@@ -802,6 +813,7 @@ private fun ReaderScreen(
                 ThumbnailRail(
                     session = session,
                     currentPage = pager.currentPage,
+                    bookmarks = bookmarks,
                     onPageClick = { page ->
                         scope.launch { pager.animateScrollToPage(page) }
                     }
@@ -978,6 +990,7 @@ private fun ReaderScreen(
 private fun ThumbnailRail(
     session: PdfSession,
     currentPage: Int,
+    bookmarks: Set<Int>,
     onPageClick: (Int) -> Unit,
 ) {
     val listState = rememberLazyListState()
@@ -1009,6 +1022,7 @@ private fun ThumbnailRail(
                     session = session,
                     pageIndex = page,
                     selected = page == currentPage,
+                    bookmarked = page in bookmarks,
                     onClick = { onPageClick(page) }
                 )
             }
@@ -1021,6 +1035,7 @@ private fun ThumbnailCard(
     session: PdfSession,
     pageIndex: Int,
     selected: Boolean,
+    bookmarked: Boolean,
     onClick: () -> Unit,
 ) {
     val bitmap by produceState<Bitmap?>(initialValue = null, session.fingerprint, pageIndex) {
@@ -1066,12 +1081,24 @@ private fun ThumbnailCard(
                     contentScale = ContentScale.FillBounds
                 )
             }
-            Text(
-                "${pageIndex + 1}",
+            Row(
                 modifier = Modifier.padding(top = 3.dp),
-                color = Color(0xFF515151),
-                style = MaterialTheme.typography.labelSmall
-            )
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(3.dp)
+            ) {
+                if (bookmarked) {
+                    Text(
+                        "★",
+                        color = MaterialTheme.colorScheme.primary,
+                        style = MaterialTheme.typography.labelSmall
+                    )
+                }
+                Text(
+                    "${pageIndex + 1}",
+                    color = Color(0xFF515151),
+                    style = MaterialTheme.typography.labelSmall
+                )
+            }
         }
     }
 }
