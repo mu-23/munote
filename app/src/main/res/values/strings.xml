@@ -76,6 +76,14 @@
     <string name="tool_eraser">橡皮</string>
     <string name="tool_lasso">套索</string>
     <string name="tool_highlighter_full">荧光笔</string>
+    <string name="input_mode_pen">笔模式</string>
+    <string name="input_mode_finger">手模式</string>
+    <string name="input_mode_pen_hint">触控笔书写，手指用于翻页和缩放</string>
+    <string name="input_mode_finger_hint">单指书写，两指拖动或缩放</string>
+    <string name="page_overview_title">页面缩略图</string>
+    <string name="page_overview_hint">三指向中间聚合可快速打开这里</string>
+    <string name="cd_back_previous_location">回到刚才的位置</string>
+    <string name="action_close">关闭</string>
     <string name="zoom_fit_label">%1$d%% · 适合页面</string>
 
     <string name="language">语言</string>

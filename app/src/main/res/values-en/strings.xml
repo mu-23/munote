@@ -76,6 +76,14 @@
     <string name="tool_eraser">Eraser</string>
     <string name="tool_lasso">Lasso</string>
     <string name="tool_highlighter_full">Highlighter</string>
+    <string name="input_mode_pen">Pen mode</string>
+    <string name="input_mode_finger">Touch mode</string>
+    <string name="input_mode_pen_hint">Write with a stylus; use fingers to turn pages and zoom</string>
+    <string name="input_mode_finger_hint">Write with one finger; pan or zoom with two fingers</string>
+    <string name="page_overview_title">Page overview</string>
+    <string name="page_overview_hint">Pinch inward with three fingers to open this view quickly</string>
+    <string name="cd_back_previous_location">Return to previous location</string>
+    <string name="action_close">Close</string>
     <string name="zoom_fit_label">%1$d%% · Fit page</string>
 
     <string name="language">Language</string>
