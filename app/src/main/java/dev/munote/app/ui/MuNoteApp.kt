@@ -89,13 +89,18 @@ import androidx.compose.ui.viewinterop.AndroidView
 import dev.munote.app.ink.InkCanvasView
 import dev.munote.app.ink.InkStore
 import dev.munote.app.ink.InkTool
+import dev.munote.app.handwriting.ChineseHandwritingRecognizer
+import dev.munote.app.handwriting.HandwritingIndexStore
+import dev.munote.app.handwriting.HandwritingModelState
 import dev.munote.app.ocr.ChineseOcrEngine
 import dev.munote.app.ocr.OcrIndexStore
 import dev.munote.app.ocr.SearchHit
+import dev.munote.app.ocr.SearchSource
 import dev.munote.app.pdf.LibraryEntry
 import dev.munote.app.pdf.PdfLibrary
 import dev.munote.app.pdf.PdfSession
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.math.abs
@@ -106,15 +111,18 @@ fun MuNoteApp(initialPdf: Uri?) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val library = remember { PdfLibrary(context) }
+    val handwritingRecognizer = remember { ChineseHandwritingRecognizer() }
 
     var session by remember { mutableStateOf<PdfSession?>(null) }
     var currentEntry by remember { mutableStateOf<LibraryEntry?>(null) }
     var indexStore by remember { mutableStateOf<OcrIndexStore?>(null) }
+    var handwritingIndexStore by remember { mutableStateOf<HandwritingIndexStore?>(null) }
     var inkStore by remember { mutableStateOf<InkStore?>(null) }
     var loadError by remember { mutableStateOf<String?>(null) }
     var ocrDone by remember { mutableIntStateOf(0) }
     var ocrRunning by remember { mutableStateOf(false) }
     var ocrRevision by remember { mutableIntStateOf(0) }
+    var handwritingModelState by remember { mutableStateOf(HandwritingModelState.NOT_READY) }
     var libraryRevision by remember { mutableIntStateOf(0) }
 
     fun attachSession(next: PdfSession, entry: LibraryEntry) {
@@ -122,6 +130,7 @@ fun MuNoteApp(initialPdf: Uri?) {
         session = next
         currentEntry = entry
         indexStore = OcrIndexStore(context, next.fingerprint)
+        handwritingIndexStore = HandwritingIndexStore(context, next.fingerprint)
         inkStore = InkStore(context, next.fingerprint)
         ocrDone = indexStore?.completedPages() ?: 0
         ocrRevision++
@@ -161,6 +170,7 @@ fun MuNoteApp(initialPdf: Uri?) {
         session = null
         currentEntry = null
         indexStore = null
+        handwritingIndexStore = null
         inkStore = null
         ocrDone = 0
         ocrRunning = false
@@ -179,7 +189,23 @@ fun MuNoteApp(initialPdf: Uri?) {
     }
 
     DisposableEffect(Unit) {
-        onDispose { session?.close() }
+        onDispose {
+            session?.close()
+            handwritingRecognizer.close()
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        handwritingModelState = if (handwritingRecognizer.isReady()) {
+            HandwritingModelState.READY
+        } else {
+            HandwritingModelState.DOWNLOADING
+            if (handwritingRecognizer.ensureReady()) {
+                HandwritingModelState.READY
+            } else {
+                HandwritingModelState.ERROR
+            }
+        }
     }
 
     BackHandler(enabled = session != null) {
@@ -221,6 +247,9 @@ fun MuNoteApp(initialPdf: Uri?) {
             documentTitle = currentEntry?.title ?: "PDF 笔记",
             session = session!!,
             indexStore = indexStore!!,
+            handwritingIndexStore = handwritingIndexStore!!,
+            handwritingRecognizer = handwritingRecognizer,
+            handwritingModelState = handwritingModelState,
             inkStore = inkStore!!,
             ocrDone = ocrDone,
             ocrRunning = ocrRunning,
@@ -389,6 +418,9 @@ private fun ReaderScreen(
     documentTitle: String,
     session: PdfSession,
     indexStore: OcrIndexStore,
+    handwritingIndexStore: HandwritingIndexStore,
+    handwritingRecognizer: ChineseHandwritingRecognizer,
+    handwritingModelState: HandwritingModelState,
     inkStore: InkStore,
     ocrDone: Int,
     ocrRunning: Boolean,
@@ -404,6 +436,7 @@ private fun ReaderScreen(
 
     var tool by remember { mutableStateOf(InkTool.PEN) }
     var inkRevision by remember { mutableIntStateOf(0) }
+    var handwritingRevision by remember { mutableIntStateOf(0) }
     var showThumbnails by remember { mutableStateOf(false) }
     var showPenOptions by remember { mutableStateOf(false) }
 
@@ -418,8 +451,31 @@ private fun ReaderScreen(
         pager.animateScrollToPage(hits[selectedHit].pageIndex)
     }
 
-    LaunchedEffect(query, ocrRevision) {
-        hits = indexStore.search(query)
+    LaunchedEffect(session.fingerprint, handwritingModelState) {
+        if (handwritingModelState != HandwritingModelState.READY) return@LaunchedEffect
+        for (page in inkStore.pageIndices()) {
+            val blocks = handwritingRecognizer.recognizePage(inkStore.page(page))
+            handwritingIndexStore.put(page, blocks)
+            handwritingRevision++
+        }
+    }
+
+    // Re-index the current page only after the user pauses writing. Continuous pen strokes keep
+    // cancelling this delay, so handwriting recognition never runs in the latency-critical path.
+    LaunchedEffect(inkRevision, pager.currentPage, handwritingModelState) {
+        if (inkRevision == 0 || handwritingModelState != HandwritingModelState.READY) {
+            return@LaunchedEffect
+        }
+        delay(700)
+        val page = pager.currentPage
+        val blocks = handwritingRecognizer.recognizePage(inkStore.page(page))
+        handwritingIndexStore.put(page, blocks)
+        handwritingRevision++
+    }
+
+    LaunchedEffect(query, ocrRevision, handwritingRevision) {
+        hits = (indexStore.search(query) + handwritingIndexStore.search(query))
+            .sortedWith(compareBy<SearchHit> { it.pageIndex }.thenBy { it.source.ordinal })
         selectedHit = selectedHit.coerceIn(0, (hits.size - 1).coerceAtLeast(0))
     }
 
@@ -461,7 +517,7 @@ private fun ReaderScreen(
                         },
                         modifier = Modifier.weight(1f),
                         singleLine = true,
-                        placeholder = { Text("搜索扫描 PDF 里的文字") },
+                        placeholder = { Text("搜索 PDF 和手写内容") },
                         leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
                         shape = RoundedCornerShape(18.dp)
                     )
@@ -489,12 +545,30 @@ private fun ReaderScreen(
                             )
                         }
                     }
+                    when (handwritingModelState) {
+                        HandwritingModelState.DOWNLOADING -> Text(
+                            "手写模型下载中",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            style = MaterialTheme.typography.labelSmall
+                        )
+                        HandwritingModelState.ERROR -> Text(
+                            "手写识别不可用",
+                            color = MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.labelSmall
+                        )
+                        else -> Unit
+                    }
                 }
 
                 if (query.isNotBlank()) {
                     if (hits.isEmpty()) {
                         Text(
-                            if (ocrRunning) "正在继续识别，当前暂无匹配" else "没有找到",
+                            when {
+                                ocrRunning -> "正在继续识别 PDF，当前暂无匹配"
+                                handwritingModelState == HandwritingModelState.DOWNLOADING ->
+                                    "手写识别模型下载中，PDF 搜索仍可用"
+                                else -> "没有找到"
+                            },
                             modifier = Modifier.padding(horizontal = 18.dp, vertical = 5.dp),
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             style = MaterialTheme.typography.bodySmall
@@ -511,8 +585,10 @@ private fun ReaderScreen(
                                 AssistChip(
                                     onClick = { scope.launch { goToHit(index) } },
                                     label = {
+                                        val sourceLabel =
+                                            if (hit.source == SearchSource.HANDWRITING) "手写" else "PDF"
                                         Text(
-                                            "第 ${hit.pageIndex + 1} 页 · ${hit.snippet}",
+                                            "第 ${hit.pageIndex + 1} 页 · $sourceLabel · ${hit.snippet}",
                                             maxLines = 1
                                         )
                                     }
@@ -1077,13 +1153,23 @@ private fun PdfInkPage(
 
                 val rect = highlight?.rect
                 if (rect != null) {
+                    val highlightFill = if (highlight.source == SearchSource.HANDWRITING) {
+                        Color(0x5538BDF8)
+                    } else {
+                        Color(0x66FFD54F)
+                    }
+                    val highlightStroke = if (highlight.source == SearchSource.HANDWRITING) {
+                        Color(0xCC0284C7)
+                    } else {
+                        Color(0xCCF59E0B)
+                    }
                     Canvas(Modifier.fillMaxSize()) {
                         val left = rect.left * size.width
                         val top = rect.top * size.height
                         val right = rect.right * size.width
                         val bottom = rect.bottom * size.height
                         drawRect(
-                            color = Color(0x66FFD54F),
+                            color = highlightFill,
                             topLeft = Offset(left, top),
                             size = Size(
                                 (right - left).coerceAtLeast(2f),
@@ -1091,7 +1177,7 @@ private fun PdfInkPage(
                             )
                         )
                         drawRect(
-                            color = Color(0xCCF59E0B),
+                            color = highlightStroke,
                             topLeft = Offset(left, top),
                             size = Size(
                                 (right - left).coerceAtLeast(2f),

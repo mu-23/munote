@@ -49,10 +49,13 @@ data class OcrRecognition(
     val blocks: List<OcrBlock>,
 )
 
+enum class SearchSource { PDF, HANDWRITING }
+
 data class SearchHit(
     val pageIndex: Int,
     val snippet: String,
     val rect: OcrRect? = null,
+    val source: SearchSource = SearchSource.PDF,
 )
 
 class ChineseOcrEngine {
