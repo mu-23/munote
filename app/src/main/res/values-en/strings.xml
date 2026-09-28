@@ -126,13 +126,13 @@
     <string name="dialog_move_folder_title">Move to folder</string>
     <string name="action_move_to_trash">Move to trash</string>
     <string name="dialog_move_to_trash_title">Move to trash?</string>
-    <string name="dialog_move_to_trash_message">The document stays in MuNote's trash and can be restored later.</string>
+    <string name="dialog_move_to_trash_message">The document stays in MuNote\'s trash and can be restored later.</string>
     <string name="action_delete_forever">Delete forever</string>
     <string name="dialog_delete_forever_title">Delete forever?</string>
     <string name="dialog_delete_forever_message">This permanently deletes the document, ink, text, and indexes. It cannot be undone.</string>
     <string name="action_restore">Restore</string>
     <string name="local_backups_title">Local backups</string>
-    <string name="local_backups_description">Backups stay inside MuNote's private app directory. Nothing is uploaded to the cloud and no folder is created at the Android storage root. MuNote makes at most one automatic backup per day on launch and keeps the latest 7 automatic snapshots.</string>
+    <string name="local_backups_description">Backups stay inside MuNote\'s private app directory. Nothing is uploaded to the cloud and no folder is created at the Android storage root. MuNote makes at most one automatic backup per day on launch and keeps the latest 7 automatic snapshots.</string>
     <string name="local_backups_empty">No local backups yet</string>
     <string name="action_backup_now">Back up now</string>
     <string name="backup_auto">Automatic backup</string>
