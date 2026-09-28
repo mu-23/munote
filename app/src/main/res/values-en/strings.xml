@@ -53,6 +53,7 @@
     <string name="cd_shrink_selection">Shrink selected ink</string>
     <string name="cd_grow_selection">Enlarge selected ink</string>
     <string name="cd_delete_selection">Delete selected ink</string>
+    <string name="cd_delete_text_box">Delete text box</string>
     <string name="cd_undo">Undo</string>
     <string name="cd_redo">Redo</string>
     <string name="cd_previous_page">Previous page</string>
@@ -69,12 +70,14 @@
     <string name="search_no_results">No results</string>
     <string name="search_source_handwriting">Handwriting</string>
     <string name="search_source_pdf">PDF</string>
+    <string name="search_source_text">Text</string>
     <string name="search_result_label">Page %1$d · %2$s · %3$s</string>
 
     <string name="tool_pen">Pen</string>
     <string name="tool_highlighter">Highlight</string>
     <string name="tool_eraser">Eraser</string>
     <string name="tool_lasso">Lasso</string>
+    <string name="tool_text">Text</string>
     <string name="tool_highlighter_full">Highlighter</string>
     <string name="input_mode_pen">Pen mode</string>
     <string name="input_mode_finger">Touch mode</string>

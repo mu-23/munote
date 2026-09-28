@@ -10,6 +10,8 @@ import dev.munote.app.R
 import dev.munote.app.ink.InkPoint
 import dev.munote.app.ink.InkStore
 import dev.munote.app.ink.InkStroke
+import dev.munote.app.text.TextBoxNote
+import dev.munote.app.text.TextStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
@@ -29,6 +31,7 @@ object PdfExporter {
         context: Context,
         session: PdfSession,
         inkStore: InkStore,
+        textStore: TextStore,
         destination: Uri,
         targetWidthPx: Int = 1600,
         onProgress: (completedPages: Int, totalPages: Int) -> Unit = { _, _ -> },
@@ -49,6 +52,12 @@ object PdfExporter {
                     InkPdfRenderer.draw(
                         canvas = page.canvas,
                         strokes = inkStore.page(pageIndex),
+                        pageWidth = bitmap.width.toFloat(),
+                        pageHeight = bitmap.height.toFloat(),
+                    )
+                    TextPdfRenderer.draw(
+                        canvas = page.canvas,
+                        boxes = textStore.page(pageIndex),
                         pageWidth = bitmap.width.toFloat(),
                         pageHeight = bitmap.height.toFloat(),
                     )
@@ -219,5 +228,63 @@ private object InkPdfRenderer {
         val factor = (0.48f + 0.90f * pressureCurve) * (1f - velocityThin)
         return (stroke.baseWidthDp * scale * factor)
             .coerceIn(0.7f * scale, 4.2f * scale)
+    }
+}
+
+
+private object TextPdfRenderer {
+    private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = android.graphics.Color.rgb(28, 29, 31)
+        style = Paint.Style.FILL
+    }
+
+    fun draw(
+        canvas: Canvas,
+        boxes: List<TextBoxNote>,
+        pageWidth: Float,
+        pageHeight: Float,
+    ) {
+        if (boxes.isEmpty()) return
+        val scale = minOf(pageWidth, pageHeight) / 850f
+
+        boxes.forEach { box ->
+            val text = box.text
+            if (text.isBlank()) return@forEach
+
+            paint.textSize = (box.fontSizeSp * scale).coerceAtLeast(8f)
+            val startX = box.x * pageWidth
+            val startY = box.y * pageHeight + paint.textSize
+            val maxWidth = (box.width * pageWidth).coerceAtLeast(30f)
+            val lineHeight = paint.textSize * 1.28f
+
+            val lines = wrapText(text, maxWidth)
+            lines.forEachIndexed { index, line ->
+                val y = startY + index * lineHeight
+                if (y <= pageHeight) {
+                    canvas.drawText(line, startX, y, paint)
+                }
+            }
+        }
+    }
+
+    private fun wrapText(text: String, maxWidth: Float): List<String> {
+        val output = mutableListOf<String>()
+        text.split('\n').forEach { paragraph ->
+            if (paragraph.isEmpty()) {
+                output += ""
+                return@forEach
+            }
+            val line = StringBuilder()
+            paragraph.forEach { ch ->
+                val candidate = line.toString() + ch
+                if (line.isNotEmpty() && paint.measureText(candidate) > maxWidth) {
+                    output += line.toString()
+                    line.clear()
+                }
+                line.append(ch)
+            }
+            if (line.isNotEmpty()) output += line.toString()
+        }
+        return output
     }
 }

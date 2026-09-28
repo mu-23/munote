@@ -134,6 +134,7 @@ class PdfLibrary(private val context: Context) {
             File(File(context.filesDir, "ink"), "${entry.fingerprint}.json"),
             File(File(context.filesDir, "indexes"), "${entry.fingerprint}.json"),
             File(File(context.filesDir, "handwriting-indexes"), "${entry.fingerprint}.json"),
+            File(File(context.filesDir, "text-notes"), "${entry.fingerprint}.json"),
         ).forEach { file ->
             runCatching { if (file.exists()) file.delete() }
         }

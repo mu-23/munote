@@ -49,7 +49,7 @@ data class OcrRecognition(
     val blocks: List<OcrBlock>,
 )
 
-enum class SearchSource { PDF, HANDWRITING }
+enum class SearchSource { PDF, HANDWRITING, TEXT }
 
 data class SearchHit(
     val pageIndex: Int,

@@ -53,6 +53,7 @@
     <string name="cd_shrink_selection">缩小选中笔迹</string>
     <string name="cd_grow_selection">放大选中笔迹</string>
     <string name="cd_delete_selection">删除选中笔迹</string>
+    <string name="cd_delete_text_box">删除文本框</string>
     <string name="cd_undo">撤销</string>
     <string name="cd_redo">重做</string>
     <string name="cd_previous_page">上一页</string>
@@ -69,12 +70,14 @@
     <string name="search_no_results">没有找到</string>
     <string name="search_source_handwriting">手写</string>
     <string name="search_source_pdf">PDF</string>
+    <string name="search_source_text">文本</string>
     <string name="search_result_label">第 %1$d 页 · %2$s · %3$s</string>
 
     <string name="tool_pen">钢笔</string>
     <string name="tool_highlighter">荧光</string>
     <string name="tool_eraser">橡皮</string>
     <string name="tool_lasso">套索</string>
+    <string name="tool_text">文本</string>
     <string name="tool_highlighter_full">荧光笔</string>
     <string name="input_mode_pen">笔模式</string>
     <string name="input_mode_finger">手模式</string>
