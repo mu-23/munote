@@ -118,7 +118,13 @@ class OcrIndexStore(
     }
 
     fun hasPage(index: Int): Boolean = pages.containsKey(index)
-    fun needsRefresh(index: Int): Boolean {\n        val page = pages[index] ?: return true\n        return page.text.isNotBlank() && page.blocks.isEmpty()\n    }\n    fun pageText(index: Int): String? = pages[index]?.text\n    fun completedPages(): Int = pages.size\n
+    fun needsRefresh(index: Int): Boolean {
+        val page = pages[index] ?: return true
+        return page.text.isNotBlank() && page.blocks.isEmpty()
+    }
+    fun pageText(index: Int): String? = pages[index]?.text
+    fun completedPages(): Int = pages.size
+
     suspend fun put(index: Int, recognition: OcrRecognition) = withContext(Dispatchers.IO) {
         pages[index] = OcrPage(recognition.text, recognition.blocks)
         persist()
