@@ -21,7 +21,7 @@
     <string name="action_rename">Rename</string>
     <string name="action_import_pdf">Import PDF</string>
     <string name="dialog_delete_title">Delete this document?</string>
-    <string name="dialog_delete_message">This removes MuNote&apos;s local PDF copy, handwriting, and recognition indexes. The original PDF in your file manager is not affected.</string>
+    <string name="dialog_delete_message">This removes the local MuNote PDF copy, handwriting, and recognition indexes. The original PDF in your file manager is not affected.</string>
 
     <string name="home_tagline">Handwriting first · PDF OCR · Search your ink</string>
     <string name="home_empty_title">Add a textbook or scanned PDF</string>
