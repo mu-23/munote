@@ -2,6 +2,7 @@ package dev.munote.app.ui
 
 import android.graphics.Bitmap
 import android.net.Uri
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
@@ -82,6 +83,7 @@ import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import dev.munote.app.ink.InkCanvasView
@@ -90,6 +92,8 @@ import dev.munote.app.ink.InkTool
 import dev.munote.app.ocr.ChineseOcrEngine
 import dev.munote.app.ocr.OcrIndexStore
 import dev.munote.app.ocr.SearchHit
+import dev.munote.app.pdf.LibraryEntry
+import dev.munote.app.pdf.PdfLibrary
 import dev.munote.app.pdf.PdfSession
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -101,29 +105,67 @@ import kotlin.math.roundToInt
 fun MuNoteApp(initialPdf: Uri?) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val library = remember { PdfLibrary(context) }
 
     var session by remember { mutableStateOf<PdfSession?>(null) }
+    var currentEntry by remember { mutableStateOf<LibraryEntry?>(null) }
     var indexStore by remember { mutableStateOf<OcrIndexStore?>(null) }
     var inkStore by remember { mutableStateOf<InkStore?>(null) }
     var loadError by remember { mutableStateOf<String?>(null) }
     var ocrDone by remember { mutableIntStateOf(0) }
     var ocrRunning by remember { mutableStateOf(false) }
     var ocrRevision by remember { mutableIntStateOf(0) }
+    var libraryRevision by remember { mutableIntStateOf(0) }
+
+    fun attachSession(next: PdfSession, entry: LibraryEntry) {
+        session?.close()
+        session = next
+        currentEntry = entry
+        indexStore = OcrIndexStore(context, next.fingerprint)
+        inkStore = InkStore(context, next.fingerprint)
+        ocrDone = indexStore?.completedPages() ?: 0
+        ocrRevision++
+        libraryRevision++
+    }
 
     fun openPdf(uri: Uri) {
         scope.launch {
             loadError = null
             runCatching {
+                val title = library.displayName(uri)
                 val next = PdfSession.open(context, uri)
-                session?.close()
-                session = next
-                indexStore = OcrIndexStore(context, next.fingerprint)
-                inkStore = InkStore(context, next.fingerprint)
-                ocrDone = indexStore?.completedPages() ?: 0
+                val entry = library.registerImported(next.fingerprint, title)
+                attachSession(next, entry)
             }.onFailure {
                 loadError = it.message ?: "PDF 打开失败"
             }
         }
+    }
+
+    fun openStored(entry: LibraryEntry) {
+        scope.launch {
+            loadError = null
+            runCatching {
+                val next = PdfSession.openStored(context, entry.fingerprint)
+                val touched = library.touch(entry)
+                attachSession(next, touched)
+            }.onFailure {
+                loadError = it.message ?: "本地 PDF 打开失败"
+                libraryRevision++
+            }
+        }
+    }
+
+    fun closeDocument() {
+        session?.close()
+        session = null
+        currentEntry = null
+        indexStore = null
+        inkStore = null
+        ocrDone = 0
+        ocrRunning = false
+        ocrRevision++
+        libraryRevision++
     }
 
     val picker = rememberLauncherForActivityResult(
@@ -138,6 +180,10 @@ fun MuNoteApp(initialPdf: Uri?) {
 
     DisposableEffect(Unit) {
         onDispose { session?.close() }
+    }
+
+    BackHandler(enabled = session != null) {
+        closeDocument()
     }
 
     LaunchedEffect(session?.fingerprint) {
@@ -164,57 +210,175 @@ fun MuNoteApp(initialPdf: Uri?) {
     }
 
     if (session == null) {
-        EmptyHome(
+        LibraryHome(
+            entries = remember(libraryRevision) { library.entries() },
             error = loadError,
-            onOpenPdf = { picker.launch(arrayOf("application/pdf")) }
+            onImport = { picker.launch(arrayOf("application/pdf")) },
+            onOpen = ::openStored,
         )
     } else {
         ReaderScreen(
+            documentTitle = currentEntry?.title ?: "PDF 笔记",
             session = session!!,
             indexStore = indexStore!!,
             inkStore = inkStore!!,
             ocrDone = ocrDone,
             ocrRunning = ocrRunning,
             ocrRevision = ocrRevision,
+            onClose = ::closeDocument,
             onOpenPdf = { picker.launch(arrayOf("application/pdf")) }
         )
     }
 }
 
 @Composable
-private fun EmptyHome(
+private fun LibraryHome(
+    entries: List<LibraryEntry>,
     error: String?,
-    onOpenPdf: () -> Unit,
+    onImport: () -> Unit,
+    onOpen: (LibraryEntry) -> Unit,
 ) {
-    Box(
+    Column(
         Modifier
             .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background),
-        contentAlignment = Alignment.Center
+            .background(MaterialTheme.colorScheme.background)
     ) {
-        Surface(
-            shape = RoundedCornerShape(28.dp),
-            tonalElevation = 2.dp,
-            modifier = Modifier.padding(28.dp)
-        ) {
-            Column(
-                Modifier.padding(horizontal = 36.dp, vertical = 30.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(14.dp)
+        Surface(tonalElevation = 1.dp) {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 22.dp, vertical = 14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                Text("MuNote", style = MaterialTheme.typography.headlineMedium)
-                Text(
-                    "手写优先 · 扫描 PDF 可搜索",
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                FilledTonalIconButton(onClick = onOpenPdf, modifier = Modifier.size(58.dp)) {
-                    Icon(Icons.Default.FolderOpen, contentDescription = "打开 PDF")
+                Column(Modifier.weight(1f)) {
+                    Text("MuNote", style = MaterialTheme.typography.headlineSmall)
+                    Text(
+                        "手写优先 · 扫描 PDF 可搜索",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.bodySmall
+                    )
                 }
-                TextButton(onClick = onOpenPdf) { Text("打开 PDF") }
-                if (error != null) {
-                    Text(error, color = MaterialTheme.colorScheme.error)
+                Surface(
+                    onClick = onImport,
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.primaryContainer
+                ) {
+                    Row(
+                        Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(7.dp)
+                    ) {
+                        Icon(Icons.Default.FolderOpen, contentDescription = null)
+                        Text("导入 PDF", style = MaterialTheme.typography.labelLarge)
+                    }
                 }
             }
+        }
+
+        if (error != null) {
+            Text(
+                error,
+                modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp),
+                color = MaterialTheme.colorScheme.error
+            )
+        }
+
+        if (entries.isEmpty()) {
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth(),
+                contentAlignment = Alignment.Center
+            ) {
+                Surface(
+                    shape = RoundedCornerShape(28.dp),
+                    tonalElevation = 1.dp,
+                    modifier = Modifier.padding(28.dp)
+                ) {
+                    Column(
+                        Modifier.padding(horizontal = 36.dp, vertical = 30.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        FilledTonalIconButton(onClick = onImport, modifier = Modifier.size(58.dp)) {
+                            Icon(Icons.Default.FolderOpen, contentDescription = "导入 PDF")
+                        }
+                        Text("把教材或扫描 PDF 放进来")
+                        Text(
+                            "首次导入后会保存在本机资料库，之后直接打开，不用重复选文件。",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+                }
+            }
+        } else {
+            Text(
+                "最近文档",
+                modifier = Modifier.padding(start = 24.dp, top = 18.dp, bottom = 8.dp),
+                style = MaterialTheme.typography.titleMedium
+            )
+            LazyColumn(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth(),
+                contentPadding = PaddingValues(horizontal = 20.dp, vertical = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                items(
+                    count = entries.size,
+                    key = { entries[it].fingerprint }
+                ) { index ->
+                    LibraryDocumentRow(
+                        entry = entries[index],
+                        onClick = { onOpen(entries[index]) }
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun LibraryDocumentRow(
+    entry: LibraryEntry,
+    onClick: () -> Unit,
+) {
+    Surface(
+        onClick = onClick,
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(18.dp),
+        tonalElevation = 1.dp
+    ) {
+        Row(
+            Modifier.padding(horizontal = 18.dp, vertical = 16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            Surface(
+                modifier = Modifier.size(48.dp),
+                shape = RoundedCornerShape(14.dp),
+                color = MaterialTheme.colorScheme.primaryContainer
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Text("PDF", style = MaterialTheme.typography.labelLarge)
+                }
+            }
+            Column(Modifier.weight(1f)) {
+                Text(
+                    entry.title,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    style = MaterialTheme.typography.titleSmall
+                )
+                Text(
+                    "本地文档 · 打开后自动继续 OCR",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodySmall
+                )
+            }
+            Icon(Icons.Default.ArrowForward, contentDescription = null)
         }
     }
 }
@@ -222,12 +386,14 @@ private fun EmptyHome(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ReaderScreen(
+    documentTitle: String,
     session: PdfSession,
     indexStore: OcrIndexStore,
     inkStore: InkStore,
     ocrDone: Int,
     ocrRunning: Boolean,
     ocrRevision: Int,
+    onClose: () -> Unit,
     onOpenPdf: () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
@@ -271,8 +437,18 @@ private fun ReaderScreen(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
+                    IconButton(onClick = onClose) {
+                        Icon(Icons.Default.ArrowBack, contentDescription = "返回资料库")
+                    }
+                    Text(
+                        documentTitle,
+                        modifier = Modifier.width(132.dp),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        style = MaterialTheme.typography.labelLarge
+                    )
                     IconButton(onClick = onOpenPdf) {
-                        Icon(Icons.Default.FolderOpen, contentDescription = "打开 PDF")
+                        Icon(Icons.Default.FolderOpen, contentDescription = "导入另一个 PDF")
                     }
                     IconButton(onClick = { showThumbnails = !showThumbnails }) {
                         Icon(Icons.Default.List, contentDescription = "页面缩略图")
