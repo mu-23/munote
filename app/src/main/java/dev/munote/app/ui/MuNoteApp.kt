@@ -91,6 +91,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
@@ -797,8 +798,7 @@ private fun ReaderScreen(
     var showThumbnails by remember { mutableStateOf(false) }
     var showBookmarksOnly by remember { mutableStateOf(false) }
     var showPageOverview by remember { mutableStateOf(false) }
-    var overviewOriginPage by remember { mutableIntStateOf(0) }
-    var previousLocation by remember { mutableStateOf<Int?>(null) }
+    val pageHistory = remember { mutableStateListOf<Int>() }
     val inputPrefs = remember { context.getSharedPreferences("editor_preferences", android.content.Context.MODE_PRIVATE) }
     var fingerWriting by remember { mutableStateOf(inputPrefs.getBoolean("finger_writing", false)) }
     var showPageJump by remember { mutableStateOf(false) }
@@ -857,8 +857,18 @@ private fun ReaderScreen(
     suspend fun jumpToPage(page: Int, rememberLocation: Boolean = true) {
         val target = page.coerceIn(0, session.pageCount - 1)
         if (target == pager.currentPage) return
-        if (rememberLocation) previousLocation = pager.currentPage
+        if (rememberLocation) {
+            if (pageHistory.lastOrNull() != pager.currentPage) {
+                pageHistory += pager.currentPage
+                while (pageHistory.size > 20) pageHistory.removeAt(0)
+            }
+        }
         pager.animateScrollToPage(target)
+    }
+
+    suspend fun goBackInPageHistory() {
+        val target = pageHistory.removeLastOrNull() ?: return
+        pager.animateScrollToPage(target.coerceIn(0, session.pageCount - 1))
     }
 
     suspend fun goToHit(index: Int) {
@@ -868,7 +878,6 @@ private fun ReaderScreen(
     }
 
     fun openPageOverview() {
-        overviewOriginPage = pager.currentPage
         showPageOverview = true
     }
 
@@ -951,9 +960,8 @@ private fun ReaderScreen(
             bookmarks = bookmarks,
             onDismiss = { showPageOverview = false },
             onSelectPage = { page ->
-                previousLocation = overviewOriginPage
                 showPageOverview = false
-                scope.launch { jumpToPage(page, rememberLocation = false) }
+                scope.launch { jumpToPage(page) }
             }
         )
     }
@@ -1273,14 +1281,11 @@ private fun ReaderScreen(
                         inputPrefs.edit().putBoolean("finger_writing", fingerWriting).apply()
                     }
                 )
-                if (previousLocation != null) {
+                if (pageHistory.isNotEmpty()) {
                     Spacer(Modifier.width(6.dp))
                     IconButton(
                         onClick = {
-                            val target = previousLocation ?: return@IconButton
-                            val current = pager.currentPage
-                            previousLocation = current
-                            scope.launch { jumpToPage(target, rememberLocation = false) }
+                            scope.launch { goBackInPageHistory() }
                         }
                     ) {
                         Icon(
