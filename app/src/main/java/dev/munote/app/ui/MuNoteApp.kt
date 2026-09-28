@@ -545,6 +545,7 @@ private fun LibraryDocumentRow(
 @Composable
 private fun ReaderScreen(
     documentTitle: String,
+    initialPage: Int,
     session: PdfSession,
     indexStore: OcrIndexStore,
     handwritingIndexStore: HandwritingIndexStore,
@@ -554,12 +555,16 @@ private fun ReaderScreen(
     ocrDone: Int,
     ocrRunning: Boolean,
     ocrRevision: Int,
+    onPageChanged: (Int) -> Unit,
     onClose: () -> Unit,
     onOpenPdf: () -> Unit,
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val pager = rememberPagerState(pageCount = { session.pageCount })
+    val pager = rememberPagerState(
+        initialPage = initialPage.coerceIn(0, (session.pageCount - 1).coerceAtLeast(0)),
+        pageCount = { session.pageCount }
+    )
     var query by remember { mutableStateOf("") }
     var hits by remember { mutableStateOf<List<SearchHit>>(emptyList()) }
     var selectedHit by remember { mutableIntStateOf(0) }
@@ -635,6 +640,10 @@ private fun ReaderScreen(
         hits = (indexStore.search(query) + handwritingIndexStore.search(query))
             .sortedWith(compareBy<SearchHit> { it.pageIndex }.thenBy { it.source.ordinal })
         selectedHit = selectedHit.coerceIn(0, (hits.size - 1).coerceAtLeast(0))
+    }
+
+    LaunchedEffect(pager.currentPage) {
+        onPageChanged(pager.currentPage)
     }
 
     Column(
