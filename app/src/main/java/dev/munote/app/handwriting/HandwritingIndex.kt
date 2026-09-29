@@ -102,7 +102,10 @@ class ChineseHandwritingRecognizer(private val context: Context) {
                 else stroke.copy(points = safePoints)
             }
             .toList()
-        if (penStrokes.isEmpty()) return emptyList()
+        // A single stroke is commonly an unfinished mark/line and is not useful enough
+        // to justify entering ML Kit's recognition path. This also keeps one malformed legacy
+        // stroke from repeatedly crashing a document when it is reopened.
+        if (penStrokes.size < 2) return emptyList()
         if (!isReady()) return emptyList()
 
         val lines = runCatching { clusterIntoLines(penStrokes) }
