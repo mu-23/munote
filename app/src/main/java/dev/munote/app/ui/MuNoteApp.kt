@@ -36,6 +36,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.requiredHeight
+import androidx.compose.foundation.layout.requiredWidth
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
@@ -2083,6 +2085,17 @@ private fun ReaderScreen(
             }.getOrDefault(PageFlowDirection.HORIZONTAL)
         )
     }
+    var documentZoom by remember(session.fingerprint) {
+        mutableStateOf(
+            inputPrefs.getFloat(
+                "document_zoom_${session.fingerprint}",
+                1f
+            ).coerceIn(0.5f, 8f)
+        )
+    }
+    var crossAxisPan by remember(session.fingerprint, pageFlowDirection) {
+        mutableStateOf(0f)
+    }
     val currentPage by remember(session.fingerprint, session.pageCount) {
         derivedStateOf {
             val layout = pageListState.layoutInfo
@@ -2882,6 +2895,62 @@ private fun ReaderScreen(
             ) {
                 val viewportWidth = maxWidth
                 val viewportHeight = maxHeight
+                val viewportDensity = LocalDensity.current
+                val viewportCrossAxisPx = with(viewportDensity) {
+                    if (pageFlowDirection == PageFlowDirection.VERTICAL) {
+                        viewportWidth.toPx()
+                    } else {
+                        viewportHeight.toPx()
+                    }
+                }
+
+                fun updateDocumentTransform(zoomChange: Float, pan: Offset) {
+                    val safeZoomChange = zoomChange
+                        .takeIf { it.isFinite() && it > 0f }
+                        ?: 1f
+                    val nextZoom = (documentZoom * safeZoomChange).coerceIn(0.5f, 8f)
+                    documentZoom = nextZoom
+                    inputPrefs.edit()
+                        .putFloat("document_zoom_${session.fingerprint}", nextZoom)
+                        .apply()
+
+                    val crossDelta = if (pageFlowDirection == PageFlowDirection.VERTICAL) {
+                        pan.x
+                    } else {
+                        pan.y
+                    }
+                    val maxCrossPan = (
+                        viewportCrossAxisPx * (nextZoom - 1f).coerceAtLeast(0f) * 0.5f
+                        )
+                    crossAxisPan = if (nextZoom <= 1f) {
+                        0f
+                    } else {
+                        (crossAxisPan + crossDelta).coerceIn(-maxCrossPan, maxCrossPan)
+                    }
+
+                    val mainDelta = if (pageFlowDirection == PageFlowDirection.HORIZONTAL) {
+                        -pan.x
+                    } else {
+                        -pan.y
+                    }
+                    if (mainDelta.isFinite() && kotlin.math.abs(mainDelta) > 0.01f) {
+                        pageListState.dispatchRawDelta(mainDelta)
+                    }
+                }
+
+                fun flingDocument(scrollVelocityPxPerSecond: Float) {
+                    if (!scrollVelocityPxPerSecond.isFinite()) return
+                    scope.launch {
+                        var velocity = scrollVelocityPxPerSecond.coerceIn(-14000f, 14000f)
+                        repeat(120) {
+                            if (kotlin.math.abs(velocity) < 35f) return@launch
+                            val consumed = pageListState.scrollBy(velocity * 0.016f)
+                            if (kotlin.math.abs(consumed) < 0.25f) return@launch
+                            velocity *= 0.92f
+                            delay(16)
+                        }
+                    }
+                }
 
                 val pageContent: @Composable (Int) -> Unit = { page ->
                     PdfInkPage(
@@ -2908,18 +2977,10 @@ private fun ReaderScreen(
                         fingerWritingEnabled = fingerWriting,
                         continuousPaging = true,
                         pageFlowDirection = pageFlowDirection,
-                        onContinuousPan = { pan ->
-                            scope.launch {
-                                val delta = if (
-                                    pageFlowDirection == PageFlowDirection.HORIZONTAL
-                                ) {
-                                    -pan.x
-                                } else {
-                                    -pan.y
-                                }
-                                pageListState.scrollBy(delta)
-                            }
-                        },
+                        documentZoom = documentZoom,
+                        crossAxisPan = crossAxisPan,
+                        onDocumentTransform = ::updateDocumentTransform,
+                        onContinuousFling = ::flingDocument,
                         onShowPageOverview = ::openPageOverview,
                         onAddTextBox = { x, y ->
                             scope.launch {
@@ -3021,40 +3082,30 @@ private fun ReaderScreen(
                     LazyRow(
                         state = pageListState,
                         modifier = Modifier.fillMaxSize(),
-                        contentPadding = PaddingValues(horizontal = 8.dp),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        contentPadding = PaddingValues(horizontal = 2.dp),
+                        horizontalArrangement = Arrangement.spacedBy(3.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
                         items(
                             count = session.pageCount,
                             key = { it }
                         ) { page ->
-                            Box(
-                                Modifier
-                                    .width(viewportWidth)
-                                    .height(viewportHeight)
-                            ) {
-                                pageContent(page)
-                            }
+                            pageContent(page)
                         }
                     }
                 } else {
                     LazyColumn(
                         state = pageListState,
                         modifier = Modifier.fillMaxSize(),
-                        contentPadding = PaddingValues(vertical = 8.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                        contentPadding = PaddingValues(vertical = 2.dp),
+                        verticalArrangement = Arrangement.spacedBy(3.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
                     ) {
                         items(
                             count = session.pageCount,
                             key = { it }
                         ) { page ->
-                            Box(
-                                Modifier
-                                    .width(viewportWidth)
-                                    .height(viewportHeight)
-                            ) {
-                                pageContent(page)
-                            }
+                            pageContent(page)
                         }
                     }
                 }
@@ -5010,7 +5061,10 @@ private fun PdfInkPage(
     fingerWritingEnabled: Boolean,
     continuousPaging: Boolean,
     pageFlowDirection: PageFlowDirection,
-    onContinuousPan: (Offset) -> Unit,
+    documentZoom: Float,
+    crossAxisPan: Float,
+    onDocumentTransform: (Float, Offset) -> Unit,
+    onContinuousFling: (Float) -> Unit,
     onShowPageOverview: () -> Unit,
     onAddTextBox: (Float, Float) -> Unit,
     onUpdateTextBox: (TextBoxNote) -> Unit,
@@ -5034,56 +5088,45 @@ private fun PdfInkPage(
         }
     }
 
-    var scale by remember(pageIndex) { mutableStateOf(1f) }
-    var pan by remember(pageIndex) { mutableStateOf(Offset.Zero) }
+    val outerModifier = when {
+        !continuousPaging -> Modifier.fillMaxSize()
+        pageFlowDirection == PageFlowDirection.VERTICAL -> Modifier.fillMaxWidth()
+        else -> Modifier.fillMaxHeight()
+    }
 
     BoxWithConstraints(
-        Modifier
-            .fillMaxSize()
-            .padding(14.dp),
+        outerModifier.padding(if (continuousPaging) 1.dp else 14.dp),
         contentAlignment = Alignment.Center
     ) {
         val bmp = bitmap
-        if (bmp == null) {
-            CircularProgressIndicator()
-            return@BoxWithConstraints
-        }
-
         val density = LocalDensity.current
-        val pageRatio = bmp.width.toFloat() / bmp.height.toFloat()
-        val containerRatio = maxWidth.value / maxHeight.value
-        val pageWidthPx: Float
-        val pageHeightPx: Float
-        val pageModifier: Modifier
-
-        if (containerRatio <= pageRatio) {
-            pageWidthPx = with(density) { maxWidth.toPx() }
-            pageHeightPx = pageWidthPx / pageRatio
-            pageModifier = Modifier.fillMaxWidth().aspectRatio(pageRatio)
+        val pageRatio = if (bmp != null && bmp.height > 0) {
+            bmp.width.toFloat() / bmp.height.toFloat()
         } else {
-            pageHeightPx = with(density) { maxHeight.toPx() }
-            pageWidthPx = pageHeightPx * pageRatio
-            pageModifier = Modifier.fillMaxHeight().aspectRatio(pageRatio)
+            0.7071f
         }
+        val safeZoom = documentZoom.coerceIn(0.5f, 8f)
 
-        fun clampPan(candidate: Offset, zoom: Float): Offset {
-            if (zoom <= 1.001f) return Offset.Zero
-            val maxX = (pageWidthPx * (zoom - 1f) / 2f).coerceAtLeast(0f)
-            val maxY = (pageHeightPx * (zoom - 1f) / 2f).coerceAtLeast(0f)
-            return Offset(
-                candidate.x.coerceIn(-maxX, maxX),
-                candidate.y.coerceIn(-maxY, maxY)
-            )
-        }
-
-        fun applyTransform(zoomChange: Float, panChange: Offset) {
-            val nextScale = (scale * zoomChange).coerceIn(1f, 4f)
-            if (nextScale <= 1.01f) {
-                scale = 1f
-                pan = Offset.Zero
+        val pageModifier = if (continuousPaging) {
+            if (pageFlowDirection == PageFlowDirection.VERTICAL) {
+                val pageWidth = maxWidth * safeZoom
+                val pageHeight = pageWidth / pageRatio
+                Modifier
+                    .requiredWidth(pageWidth)
+                    .height(pageHeight)
             } else {
-                scale = nextScale
-                pan = clampPan(pan + panChange, nextScale)
+                val pageHeight = maxHeight * safeZoom
+                val pageWidth = pageHeight * pageRatio
+                Modifier
+                    .requiredHeight(pageHeight)
+                    .width(pageWidth)
+            }
+        } else {
+            val containerRatio = maxWidth.value / maxHeight.value
+            if (containerRatio <= pageRatio) {
+                Modifier.fillMaxWidth().aspectRatio(pageRatio)
+            } else {
+                Modifier.fillMaxHeight().aspectRatio(pageRatio)
             }
         }
 
@@ -5093,130 +5136,136 @@ private fun PdfInkPage(
             tool,
             continuousPaging,
             pageFlowDirection,
+            documentZoom,
         ) {
             awaitEachGesture {
                 val first = awaitFirstDown(requireUnconsumed = false)
 
-                    // Stylus/eraser input is owned by InkCanvasView. This recognizer is finger-only.
-                    if (first.type != PointerType.Touch) {
-                        var pressed = true
-                        while (pressed) {
-                            val event = awaitPointerEvent(PointerEventPass.Final)
-                            pressed = event.changes.any { it.pressed }
-                        }
-                        return@awaitEachGesture
-                    }
-
-                    var pinched = false
-                    var threeFingerGesture = false
-                    var overviewTriggered = false
-                    var threeFingerZoom = 1f
-                    var twoFingerZoom = 1f
-                    var twoFingerPanX = 0f
-                    var twoFingerPanY = 0f
-                    var dragX = 0f
-                    var dragY = 0f
+                if (first.type != PointerType.Touch) {
                     var pressed = true
-
                     while (pressed) {
-                        val event = awaitPointerEvent(PointerEventPass.Main)
-                        val down = event.changes.filter { it.pressed }
-                        pressed = down.isNotEmpty()
-                        if (!pressed) break
+                        val event = awaitPointerEvent(PointerEventPass.Final)
+                        pressed = event.changes.any { it.pressed }
+                    }
+                    return@awaitEachGesture
+                }
 
-                        when {
-                            down.size >= 3 -> {
-                                threeFingerGesture = true
-                                val zoomChange = event.calculateZoom()
-                                if (zoomChange.isFinite() && zoomChange > 0f) {
-                                    threeFingerZoom *= zoomChange
-                                }
-                                if (!overviewTriggered && threeFingerZoom < 0.72f) {
-                                    overviewTriggered = true
-                                    onShowPageOverview()
-                                }
+                var pinched = false
+                var threeFingerGesture = false
+                var overviewTriggered = false
+                var threeFingerZoom = 1f
+                var twoFingerZoom = 1f
+                var twoFingerPanX = 0f
+                var twoFingerPanY = 0f
+                var dragX = 0f
+                var dragY = 0f
+                var twoFingerAxisVelocity = 0f
+                var lastTwoFingerTime = 0L
+                var pressed = true
+
+                while (pressed) {
+                    val event = awaitPointerEvent(PointerEventPass.Main)
+                    val down = event.changes.filter { it.pressed }
+                    pressed = down.isNotEmpty()
+                    if (!pressed) break
+
+                    when {
+                        down.size >= 3 -> {
+                            threeFingerGesture = true
+                            val zoomChange = event.calculateZoom()
+                            if (zoomChange.isFinite() && zoomChange > 0f) {
+                                threeFingerZoom *= zoomChange
+                            }
+                            if (!overviewTriggered && threeFingerZoom < 0.72f) {
+                                overviewTriggered = true
+                                onShowPageOverview()
+                            }
+                            event.changes.forEach { it.consume() }
+                        }
+
+                        down.size == 2 -> {
+                            pinched = true
+                            val zoomChange = event.calculateZoom()
+                            val panChange = event.calculatePan()
+
+                            if (zoomChange.isFinite() && zoomChange > 0f) {
+                                twoFingerZoom *= zoomChange
+                            }
+                            twoFingerPanX += panChange.x
+                            twoFingerPanY += panChange.y
+
+                            val axisDelta = if (
+                                pageFlowDirection == PageFlowDirection.HORIZONTAL
+                            ) {
+                                panChange.x
+                            } else {
+                                panChange.y
+                            }
+                            val eventTime = down.firstOrNull()?.uptimeMillis ?: 0L
+                            if (lastTwoFingerTime != 0L && eventTime != 0L) {
+                                val dt = (eventTime - lastTwoFingerTime)
+                                    .coerceAtLeast(1L)
+                                    .toFloat()
+                                val instantVelocity = axisDelta * 1000f / dt
+                                twoFingerAxisVelocity =
+                                    twoFingerAxisVelocity * 0.68f + instantVelocity * 0.32f
+                            }
+                            if (eventTime != 0L) lastTwoFingerTime = eventTime
+
+                            if (continuousPaging) {
+                                onDocumentTransform(zoomChange, panChange)
+                                event.changes.forEach { it.consume() }
+                            } else {
                                 event.changes.forEach { it.consume() }
                             }
+                        }
 
-                            down.size == 2 -> {
-                                pinched = true
-                                val zoomChange = event.calculateZoom()
-                                val panChange = event.calculatePan()
+                        down.size == 1 && !fingerWritingEnabled && tool != InkTool.TEXT -> {
+                            val change = down.first()
+                            val delta = change.positionChange()
 
-                                if (zoomChange.isFinite() && zoomChange > 0f) {
-                                    twoFingerZoom *= zoomChange
-                                }
-                                twoFingerPanX += panChange.x
-                                twoFingerPanY += panChange.y
-
-                                val realPinch = kotlin.math.abs(zoomChange - 1f) > 0.012f
-                                if (scale > 1.01f || realPinch) {
-                                    applyTransform(zoomChange, panChange)
-                                    event.changes.forEach { it.consume() }
-                                } else if (continuousPaging && fingerWritingEnabled) {
-                                    // Touch-writing reserves one finger for ink. Two fingers
-                                    // directly drive the continuous page list instead.
-                                    onContinuousPan(panChange)
-                                    event.changes.forEach { it.consume() }
-                                } else if (!continuousPaging) {
-                                    // Legacy discrete paging still owns two-finger swipes.
-                                    event.changes.forEach { it.consume() }
-                                }
-                            }
-
-                            down.size == 1 && !fingerWritingEnabled && tool != InkTool.TEXT -> {
-                                val change = down.first()
-                                val delta = change.positionChange()
-
-                                if (pinched || scale > 1.01f) {
-                                    applyTransform(1f, delta)
-                                    change.consume()
-                                } else if (!continuousPaging) {
-                                    dragX += delta.x
-                                    dragY += delta.y
-                                    change.consume()
-                                }
-                                // In continuous mode, fit-to-page one-finger drags are left
-                                // unconsumed so the parent LazyRow/LazyColumn can scroll freely.
+                            if (!continuousPaging) {
+                                dragX += delta.x
+                                dragY += delta.y
+                                change.consume()
                             }
                         }
                     }
+                }
 
-                    val thresholdPx = with(density) { 72.dp.toPx() }
+                val thresholdPx = with(density) { 72.dp.toPx() }
 
-                    if (
-                        !continuousPaging &&
-                        !fingerWritingEnabled &&
-                        tool != InkTool.TEXT && tool != InkTool.IMAGE &&
-                        !pinched &&
-                        !threeFingerGesture &&
-                        scale <= 1.01f &&
-                        abs(dragX) >= thresholdPx &&
-                        abs(dragX) > abs(dragY) * 1.15f
-                    ) {
-                        onPageSwipe(if (dragX < 0f) 1 else -1)
-                    }
+                if (
+                    !continuousPaging &&
+                    !fingerWritingEnabled &&
+                    tool != InkTool.TEXT && tool != InkTool.IMAGE &&
+                    !pinched &&
+                    !threeFingerGesture &&
+                    abs(dragX) >= thresholdPx &&
+                    abs(dragX) > abs(dragY) * 1.15f
+                ) {
+                    onPageSwipe(if (dragX < 0f) 1 else -1)
+                }
 
-                    // Touch mode reserves one finger for writing, so page turning needs a
-                    // two-finger gesture. Only treat it as a page swipe when there was little
-                    // actual pinch zoom; otherwise the user's intent was zooming.
-                    if (
-                        !continuousPaging &&
-                        pinched &&
-                        !threeFingerGesture &&
-                        scale <= 1.01f &&
-                        twoFingerZoom in 0.88f..1.12f &&
-                        abs(twoFingerPanX) >= thresholdPx &&
-                        abs(twoFingerPanX) > abs(twoFingerPanY) * 1.15f
-                    ) {
-                        onPageSwipe(if (twoFingerPanX < 0f) 1 else -1)
-                    }
+                if (
+                    !continuousPaging &&
+                    pinched &&
+                    !threeFingerGesture &&
+                    twoFingerZoom in 0.88f..1.12f &&
+                    abs(twoFingerPanX) >= thresholdPx &&
+                    abs(twoFingerPanX) > abs(twoFingerPanY) * 1.15f
+                ) {
+                    onPageSwipe(if (twoFingerPanX < 0f) 1 else -1)
+                }
 
-                if (scale <= 1.01f) {
-                    scale = 1f
-                    pan = Offset.Zero
-                } else {
-                    pan = clampPan(pan, scale)
+                if (
+                    continuousPaging &&
+                    pinched &&
+                    !threeFingerGesture &&
+                    twoFingerZoom in 0.88f..1.12f &&
+                    abs(twoFingerAxisVelocity) > 120f
+                ) {
+                    onContinuousFling(-twoFingerAxisVelocity)
                 }
             }
         }
@@ -5225,22 +5274,43 @@ private fun PdfInkPage(
             modifier = pageModifier
                 .then(gestureModifier)
                 .graphicsLayer {
-                    scaleX = scale
-                    scaleY = scale
-                    translationX = pan.x
-                    translationY = pan.y
+                    translationX = if (
+                        continuousPaging &&
+                        pageFlowDirection == PageFlowDirection.VERTICAL
+                    ) {
+                        crossAxisPan
+                    } else {
+                        0f
+                    }
+                    translationY = if (
+                        continuousPaging &&
+                        pageFlowDirection == PageFlowDirection.HORIZONTAL
+                    ) {
+                        crossAxisPan
+                    } else {
+                        0f
+                    }
                 },
-            shadowElevation = 3.dp,
-            shape = RoundedCornerShape(4.dp),
+            shadowElevation = if (continuousPaging) 1.dp else 3.dp,
+            shape = RoundedCornerShape(if (continuousPaging) 2.dp else 4.dp),
             color = Color.White
         ) {
             Box(Modifier.fillMaxSize()) {
-                Image(
-                    bitmap = bmp.asImageBitmap(),
-                    contentDescription = stringResource(R.string.cd_pdf_page, pageIndex + 1),
-                    modifier = Modifier.fillMaxSize(),
-                    contentScale = ContentScale.FillBounds
-                )
+                if (bmp == null) {
+                    CircularProgressIndicator(
+                        modifier = Modifier
+                            .align(Alignment.Center)
+                            .size(26.dp),
+                        strokeWidth = 2.dp
+                    )
+                } else {
+                    Image(
+                        bitmap = bmp.asImageBitmap(),
+                        contentDescription = stringResource(R.string.cd_pdf_page, pageIndex + 1),
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.FillBounds
+                    )
+                }
 
                 val rect = highlight?.rect
                 if (rect != null) {
@@ -5375,23 +5445,28 @@ private fun PdfInkPage(
             }
         }
 
-        if (scale > 1.01f) {
+        if (continuousPaging && abs(documentZoom - 1f) > 0.01f) {
             Surface(
                 onClick = {
-                    scale = 1f
-                    pan = Offset.Zero
+                    onDocumentTransform(
+                        1f / documentZoom.coerceAtLeast(0.01f),
+                        Offset.Zero
+                    )
                 },
                 modifier = Modifier
                     .align(Alignment.TopEnd)
-                    .padding(8.dp),
+                    .padding(4.dp),
                 shape = CircleShape,
                 color = MaterialTheme.colorScheme.surface.copy(alpha = 0.94f),
-                tonalElevation = 2.dp
+                tonalElevation = 1.dp
             ) {
                 Text(
-                    stringResource(R.string.zoom_fit_label, (scale * 100).roundToInt()),
-                    modifier = Modifier.padding(horizontal = 11.dp, vertical = 7.dp),
-                    style = MaterialTheme.typography.labelMedium
+                    stringResource(
+                        R.string.zoom_fit_label,
+                        (documentZoom * 100).roundToInt()
+                    ),
+                    modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp),
+                    style = MaterialTheme.typography.labelSmall
                 )
             }
         }
