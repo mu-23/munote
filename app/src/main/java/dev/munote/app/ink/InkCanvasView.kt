@@ -427,12 +427,14 @@ class InkCanvasView(context: Context) : View(context) {
     ) {
         if (width <= 0 || height <= 0) return
 
+        if (!xRaw.isFinite() || !yRaw.isFinite()) return
+
         val inputPressure = if (activeInputWasFinger) {
             // Finger MotionEvent pressure is highly device-specific and is often pinned near 1.0.
             // Use a stable virtual pressure so touch-writing does not become an extra-thick marker.
             0.52f
         } else {
-            pressureRaw.coerceIn(0.03f, 1f)
+            if (pressureRaw.isFinite()) pressureRaw.coerceIn(0.03f, 1f) else 0.52f
         }
 
         if (first) {
@@ -468,10 +470,10 @@ class InkCanvasView(context: Context) : View(context) {
         }
 
         val point = InkPoint(
-            x = sx / width,
-            y = sy / height,
-            pressure = smoothPressure,
-            timeMs = time,
+            x = (sx / width).coerceIn(0f, 1f),
+            y = (sy / height).coerceIn(0f, 1f),
+            pressure = smoothPressure.coerceIn(0.01f, 1f),
+            timeMs = time.coerceAtLeast(0L),
         )
 
         val last = active.lastOrNull()
