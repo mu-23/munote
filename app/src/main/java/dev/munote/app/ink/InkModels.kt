@@ -53,87 +53,129 @@ class InkStore(context: Context, fingerprint: String) {
     private val pages = linkedMapOf<Int, MutableList<InkStroke>>()
     private val undoStacks = mutableMapOf<Int, ArrayDeque<List<InkStroke>>>()
     private val redoStacks = mutableMapOf<Int, ArrayDeque<List<InkStroke>>>()
+    private val lock = Any()
 
     init {
         if (file.exists()) {
             runCatching {
-                json.decodeFromString<InkDocument>(file.readText()).pages.forEach { (k, v) ->
-                    pages[k] = v.toMutableList()
+                val decoded = json.decodeFromString<InkDocument>(file.readText())
+                synchronized(lock) {
+                    decoded.pages.forEach { (page, strokes) ->
+                        val safe = strokes.mapNotNull(::sanitizeStroke)
+                        if (safe.isNotEmpty()) pages[page] = safe.toMutableList()
+                    }
+                }
+            }.onFailure {
+                // Keep the original bytes for diagnosis/recovery, but never let one malformed
+                // sidecar make the source PDF/notebook permanently unopenable.
+                runCatching {
+                    val quarantine = File(
+                        file.parentFile,
+                        file.nameWithoutExtension + ".corrupt-" +
+                            System.currentTimeMillis() + ".json"
+                    )
+                    file.copyTo(quarantine, overwrite = false)
                 }
             }
         }
     }
 
-    fun page(index: Int): List<InkStroke> = pages[index]?.toList().orEmpty()
-    fun pageIndices(): List<Int> = pages.entries
-        .filter { it.value.isNotEmpty() }
-        .map { it.key }
-        .sorted()
+    fun page(index: Int): List<InkStroke> = synchronized(lock) {
+        pages[index]?.toList().orEmpty()
+    }
 
-    fun canUndo(index: Int): Boolean = !undoStacks[index].isNullOrEmpty()
-    fun canRedo(index: Int): Boolean = !redoStacks[index].isNullOrEmpty()
+    fun pageIndices(): List<Int> = synchronized(lock) {
+        pages.entries
+            .filter { it.value.isNotEmpty() }
+            .map { it.key }
+            .sorted()
+    }
+
+    fun canUndo(index: Int): Boolean = synchronized(lock) {
+        !undoStacks[index].isNullOrEmpty()
+    }
+
+    fun canRedo(index: Int): Boolean = synchronized(lock) {
+        !redoStacks[index].isNullOrEmpty()
+    }
 
     suspend fun replacePage(index: Int, strokes: List<InkStroke>) = withContext(Dispatchers.IO) {
-        val before = page(index)
-        if (before == strokes) return@withContext
-        pushUndo(index, before)
-        redoStacks[index]?.clear()
-        pages[index] = strokes.toMutableList()
+        val safe = strokes.mapNotNull(::sanitizeStroke)
+        synchronized(lock) {
+            val before = pages[index]?.toList().orEmpty()
+            if (before == safe) return@withContext
+            pushUndoLocked(index, before)
+            redoStacks[index]?.clear()
+            pages[index] = safe.toMutableList()
+        }
         persist()
     }
 
     suspend fun append(index: Int, stroke: InkStroke) = withContext(Dispatchers.IO) {
-        val before = page(index)
-        pushUndo(index, before)
-        redoStacks[index]?.clear()
-        pages.getOrPut(index) { mutableListOf() }.add(stroke)
+        val safe = sanitizeStroke(stroke) ?: return@withContext
+        synchronized(lock) {
+            val before = pages[index]?.toList().orEmpty()
+            pushUndoLocked(index, before)
+            redoStacks[index]?.clear()
+            pages.getOrPut(index) { mutableListOf() }.add(safe)
+        }
         persist()
     }
 
     suspend fun undo(index: Int): List<InkStroke> = withContext(Dispatchers.IO) {
-        val stack = undoStacks[index]
-        val previous = stack?.removeLastOrNull() ?: return@withContext page(index)
-        pushRedo(index, page(index))
-        pages[index] = previous.toMutableList()
+        val previous = synchronized(lock) {
+            val stack = undoStacks[index]
+            val value = stack?.removeLastOrNull() ?: return@synchronized null
+            pushRedoLocked(index, pages[index]?.toList().orEmpty())
+            pages[index] = value.toMutableList()
+            value
+        } ?: return@withContext page(index)
         persist()
         previous
     }
 
     suspend fun redo(index: Int): List<InkStroke> = withContext(Dispatchers.IO) {
-        val stack = redoStacks[index]
-        val next = stack?.removeLastOrNull() ?: return@withContext page(index)
-        pushUndo(index, page(index), clearRedo = false)
-        pages[index] = next.toMutableList()
+        val next = synchronized(lock) {
+            val stack = redoStacks[index]
+            val value = stack?.removeLastOrNull() ?: return@synchronized null
+            pushUndoLocked(index, pages[index]?.toList().orEmpty())
+            pages[index] = value.toMutableList()
+            value
+        } ?: return@withContext page(index)
         persist()
         next
     }
 
     suspend fun deletePage(index: Int) = withContext(Dispatchers.IO) {
-        val remapped = linkedMapOf<Int, MutableList<InkStroke>>()
-        pages.entries.sortedBy { it.key }.forEach { (page, strokes) ->
-            when {
-                page < index -> remapped[page] = strokes.toMutableList()
-                page > index -> remapped[page - 1] = strokes.toMutableList()
+        synchronized(lock) {
+            val remapped = linkedMapOf<Int, MutableList<InkStroke>>()
+            pages.entries.sortedBy { it.key }.forEach { (page, strokes) ->
+                when {
+                    page < index -> remapped[page] = strokes.toMutableList()
+                    page > index -> remapped[page - 1] = strokes.toMutableList()
+                }
             }
+            pages.clear()
+            pages.putAll(remapped)
+            undoStacks.clear()
+            redoStacks.clear()
         }
-        pages.clear()
-        pages.putAll(remapped)
-        undoStacks.clear()
-        redoStacks.clear()
         persist()
     }
 
     suspend fun duplicatePage(index: Int) = withContext(Dispatchers.IO) {
-        val source = page(index)
-        val remapped = linkedMapOf<Int, MutableList<InkStroke>>()
-        pages.entries.sortedBy { it.key }.forEach { (page, strokes) ->
-            remapped[if (page > index) page + 1 else page] = strokes.toMutableList()
+        synchronized(lock) {
+            val source = pages[index]?.toList().orEmpty()
+            val remapped = linkedMapOf<Int, MutableList<InkStroke>>()
+            pages.entries.sortedBy { it.key }.forEach { (page, strokes) ->
+                remapped[if (page > index) page + 1 else page] = strokes.toMutableList()
+            }
+            if (source.isNotEmpty()) remapped[index + 1] = source.toMutableList()
+            pages.clear()
+            pages.putAll(remapped.toSortedMap())
+            undoStacks.clear()
+            redoStacks.clear()
         }
-        if (source.isNotEmpty()) remapped[index + 1] = source.toMutableList()
-        pages.clear()
-        pages.putAll(remapped.toSortedMap())
-        undoStacks.clear()
-        redoStacks.clear()
         persist()
     }
 
@@ -145,35 +187,63 @@ class InkStore(context: Context, fingerprint: String) {
             fromIndex > toIndex && page in toIndex until fromIndex -> page + 1
             else -> page
         }
-        val moved = linkedMapOf<Int, MutableList<InkStroke>>()
-        pages.forEach { (page, strokes) ->
-            moved[remap(page)] = strokes.toMutableList()
+        synchronized(lock) {
+            val moved = linkedMapOf<Int, MutableList<InkStroke>>()
+            pages.forEach { (page, strokes) ->
+                moved[remap(page)] = strokes.toMutableList()
+            }
+            pages.clear()
+            pages.putAll(moved.toSortedMap())
+            undoStacks.clear()
+            redoStacks.clear()
         }
-        pages.clear()
-        pages.putAll(moved.toSortedMap())
-        undoStacks.clear()
-        redoStacks.clear()
         persist()
     }
 
-    private fun pushUndo(index: Int, snapshot: List<InkStroke>, clearRedo: Boolean = false) {
+    private fun pushUndoLocked(index: Int, snapshot: List<InkStroke>) {
         val stack = undoStacks.getOrPut(index) { ArrayDeque() }
         stack.addLast(snapshot)
         while (stack.size > HISTORY_LIMIT) stack.removeFirst()
-        if (clearRedo) redoStacks[index]?.clear()
     }
 
-    private fun pushRedo(index: Int, snapshot: List<InkStroke>) {
+    private fun pushRedoLocked(index: Int, snapshot: List<InkStroke>) {
         val stack = redoStacks.getOrPut(index) { ArrayDeque() }
         stack.addLast(snapshot)
         while (stack.size > HISTORY_LIMIT) stack.removeFirst()
     }
 
+    private fun sanitizeStroke(stroke: InkStroke): InkStroke? {
+        val safeWidth = stroke.baseWidthDp
+            .takeIf { it.isFinite() }
+            ?.coerceIn(0.2f, 64f)
+            ?: return null
+        val safePoints = stroke.points.mapNotNull { point ->
+            if (!point.x.isFinite() || !point.y.isFinite() || !point.pressure.isFinite()) {
+                null
+            } else {
+                point.copy(
+                    x = point.x.coerceIn(0f, 1f),
+                    y = point.y.coerceIn(0f, 1f),
+                    pressure = point.pressure.coerceIn(0.01f, 1f),
+                    timeMs = point.timeMs.coerceAtLeast(0L),
+                )
+            }
+        }
+        if (safePoints.isEmpty()) return null
+        return stroke.copy(
+            points = safePoints,
+            baseWidthDp = safeWidth,
+        )
+    }
+
     private fun persist() {
+        val document = synchronized(lock) {
+            InkDocument(pages.mapValues { (_, value) -> value.toList() })
+        }
         val tmp = File(file.parentFile, file.name + ".tmp")
-        tmp.writeText(json.encodeToString(InkDocument(pages.mapValues { it.value.toList() })))
+        tmp.writeText(json.encodeToString(document))
         if (file.exists()) file.delete()
-        tmp.renameTo(file)
+        check(tmp.renameTo(file)) { "Unable to persist ink" }
     }
 
     companion object {

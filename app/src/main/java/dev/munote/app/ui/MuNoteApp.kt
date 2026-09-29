@@ -2183,10 +2183,22 @@ private fun ReaderScreen(
 
     LaunchedEffect(session.fingerprint, handwritingModelState) {
         if (handwritingModelState != HandwritingModelState.READY) return@LaunchedEffect
+
+        // Recognition is derived/index data. A malformed old stroke or an ML Kit failure must
+        // never make the source document unopenable. Rebuild in the background, page by page,
+        // and isolate failures to the affected page.
         for (page in inkStore.pageIndices()) {
-            val blocks = handwritingRecognizer.recognizePage(inkStore.page(page))
-            handwritingIndexStore.put(page, blocks)
-            handwritingRevision++
+            val strokes = inkStore.page(page)
+            if (strokes.isEmpty()) continue
+            val blocks = runCatching {
+                handwritingRecognizer.recognizePage(strokes)
+            }.getOrNull() ?: continue
+            runCatching {
+                handwritingIndexStore.put(page, blocks)
+            }.onSuccess {
+                handwritingRevision++
+            }
+            delay(40)
         }
     }
 
@@ -2198,9 +2210,20 @@ private fun ReaderScreen(
         }
         delay(700)
         val page = pager.currentPage
-        val blocks = handwritingRecognizer.recognizePage(inkStore.page(page))
-        handwritingIndexStore.put(page, blocks)
-        handwritingRevision++
+        val strokes = inkStore.page(page)
+        if (strokes.isEmpty()) {
+            runCatching { handwritingIndexStore.put(page, emptyList()) }
+            handwritingRevision++
+            return@LaunchedEffect
+        }
+        val blocks = runCatching {
+            handwritingRecognizer.recognizePage(strokes)
+        }.getOrNull() ?: return@LaunchedEffect
+        runCatching {
+            handwritingIndexStore.put(page, blocks)
+        }.onSuccess {
+            handwritingRevision++
+        }
     }
 
     LaunchedEffect(query, ocrRevision, handwritingRevision, textRevision) {
