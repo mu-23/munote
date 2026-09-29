@@ -226,4 +226,12 @@
     <string name="page_overview_manage_pdf_hint">Long-press and drag pages to reorder them. Use the page menu to duplicate or delete pages. MuNote keeps this non-destructive; the original PDF file is not rewritten.</string>
     <string name="error_page_update">Unable to update pages</string>
 
+
+    <string name="action_import_backup">Import backup file</string>
+    <string name="action_export_backup">Export</string>
+    <string name="backup_imported">Imported backup</string>
+    <string name="toast_backup_exported">Backup file exported</string>
+    <string name="toast_backup_imported">Backup file imported into MuNote</string>
+    <string name="local_backups_uninstall_warning">Important: in-app backups are still private MuNote app data and are removed when the app is uninstalled. Before uninstalling or moving devices, manually export at least one backup to a location you choose.</string>
+
 </resources>

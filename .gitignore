@@ -1,0 +1,15 @@
+# Gradle / Android local state
+.gradle/
+local.properties
+**/build/
+
+# IDE
+.idea/
+*.iml
+
+# Private signing material
+*.jks
+*.keystore
+
+# The public, test-only key is intentionally versioned.
+!app/keystore/munote-test.keystore

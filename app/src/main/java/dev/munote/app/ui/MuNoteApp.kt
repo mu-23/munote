@@ -210,6 +210,7 @@ fun MuNoteApp(initialPdf: Uri?) {
     var libraryRevision by remember { mutableIntStateOf(0) }
     var backupRevision by remember { mutableIntStateOf(0) }
     var coverTarget by remember { mutableStateOf<LibraryEntry?>(null) }
+    var pendingBackupExport by remember { mutableStateOf<LocalBackupInfo?>(null) }
 
     suspend fun openEntrySession(entry: LibraryEntry): PdfSession =
         PdfSession.openStored(
@@ -354,6 +355,45 @@ fun MuNoteApp(initialPdf: Uri?) {
             scope.launch {
                 runCatching { library.setCustomCover(target, uri) }
                     .onSuccess { libraryRevision++ }
+                    .onFailure { loadError = it.message }
+            }
+        }
+    }
+
+    val backupExportLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/zip")
+    ) { uri ->
+        val backup = pendingBackupExport
+        pendingBackupExport = null
+        if (uri != null && backup != null) {
+            scope.launch {
+                runCatching {
+                    backupManager.exportBackup(backup.fileName, uri)
+                }.onSuccess {
+                    Toast.makeText(
+                        context,
+                        context.getString(R.string.toast_backup_exported),
+                        Toast.LENGTH_SHORT
+                    ).show()
+                }.onFailure { loadError = it.message }
+            }
+        }
+    }
+
+    val backupImportLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null) {
+            scope.launch {
+                runCatching { backupManager.importBackup(uri) }
+                    .onSuccess {
+                        backupRevision++
+                        Toast.makeText(
+                            context,
+                            context.getString(R.string.toast_backup_imported),
+                            Toast.LENGTH_SHORT
+                        ).show()
+                    }
                     .onFailure { loadError = it.message }
             }
         }
@@ -535,6 +575,19 @@ fun MuNoteApp(initialPdf: Uri?) {
                         }
                         .onFailure { loadError = it.message }
                 }
+            },
+            onImportBackup = {
+                backupImportLauncher.launch(
+                    arrayOf(
+                        "application/zip",
+                        "application/octet-stream",
+                        "application/x-zip-compressed",
+                    )
+                )
+            },
+            onExportBackup = { backup ->
+                pendingBackupExport = backup
+                backupExportLauncher.launch(backup.fileName)
             },
             onRestoreBackup = { backup ->
                 scope.launch {
@@ -1048,6 +1101,8 @@ private fun LibraryHome(
     onSetCover: (LibraryEntry) -> Unit,
     onResetCover: (LibraryEntry) -> Unit,
     onBackupNow: () -> Unit,
+    onImportBackup: () -> Unit,
+    onExportBackup: (LocalBackupInfo) -> Unit,
     onRestoreBackup: (LocalBackupInfo) -> Unit,
 ) {
     var renameTarget by remember { mutableStateOf<LibraryEntry?>(null) }
@@ -1309,11 +1364,28 @@ private fun LibraryHome(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         style = MaterialTheme.typography.bodySmall
                     )
-                    TextButton(onClick = onBackupNow) {
-                        Icon(Icons.Default.FileDownload, contentDescription = null)
-                        Spacer(Modifier.width(8.dp))
-                        Text(stringResource(R.string.action_backup_now))
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        TextButton(onClick = onBackupNow) {
+                            Icon(Icons.Default.FileDownload, contentDescription = null)
+                            Spacer(Modifier.width(8.dp))
+                            Text(stringResource(R.string.action_backup_now))
+                        }
+                        TextButton(onClick = onImportBackup) {
+                            Icon(Icons.Default.FolderOpen, contentDescription = null)
+                            Spacer(Modifier.width(8.dp))
+                            Text(stringResource(R.string.action_import_backup))
+                        }
                     }
+                    Text(
+                        stringResource(R.string.local_backups_uninstall_warning),
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall
+                    )
                     if (backups.isEmpty()) {
                         Text(
                             stringResource(R.string.local_backups_empty),
@@ -1331,10 +1403,13 @@ private fun LibraryHome(
                                 ) {
                                     Column(Modifier.weight(1f)) {
                                         Text(
-                                            if (backup.automatic) {
-                                                stringResource(R.string.backup_auto)
-                                            } else {
-                                                stringResource(R.string.backup_manual)
+                                            when {
+                                                backup.imported ->
+                                                    stringResource(R.string.backup_imported)
+                                                backup.automatic ->
+                                                    stringResource(R.string.backup_auto)
+                                                else ->
+                                                    stringResource(R.string.backup_manual)
                                             },
                                             style = MaterialTheme.typography.labelLarge
                                         )
@@ -1344,6 +1419,9 @@ private fun LibraryHome(
                                             style = MaterialTheme.typography.bodySmall,
                                             color = MaterialTheme.colorScheme.onSurfaceVariant
                                         )
+                                    }
+                                    TextButton(onClick = { onExportBackup(backup) }) {
+                                        Text(stringResource(R.string.action_export_backup))
                                     }
                                     TextButton(
                                         onClick = {

@@ -1,3 +1,11 @@
+val ciVersionCode = providers.environmentVariable("MUNOTE_VERSION_CODE")
+    .orNull
+    ?.toIntOrNull()
+    ?: 1
+val ciVersionName = providers.environmentVariable("MUNOTE_VERSION_NAME")
+    .orNull
+    ?: "0.2.0-dev"
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -13,17 +21,37 @@ android {
         applicationId = "dev.munote.app"
         minSdk = 29
         targetSdk = 36
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = ciVersionCode
+        versionName = ciVersionName
+        manifestPlaceholders["appLabel"] = "MuNote"
+    }
+
+    signingConfigs {
+        create("test") {
+            // Public test-only key. Never use this signing config for production/release builds.
+            storeFile = file("keystore/munote-test.keystore")
+            storePassword = "munote-test-only"
+            keyAlias = "munote-test"
+            keyPassword = "munote-test-only"
+        }
     }
 
     buildTypes {
+        debug {
+            applicationIdSuffix = ".debug"
+            versionNameSuffix = "-test"
+            manifestPlaceholders["appLabel"] = "MuNote Test"
+            signingConfig = signingConfigs.getByName("test")
+        }
         release {
             isMinifyEnabled = true
+            manifestPlaceholders["appLabel"] = "MuNote"
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+            // Release signing is deliberately NOT configured here.
+            // Production builds must use a private release key supplied outside the public repo.
         }
     }
 

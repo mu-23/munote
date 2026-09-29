@@ -1,6 +1,7 @@
 package dev.munote.app.backup
 
 import android.content.Context
+import android.net.Uri
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.BufferedInputStream
@@ -21,6 +22,7 @@ data class LocalBackupInfo(
     val modifiedAt: Long,
     val sizeBytes: Long,
     val automatic: Boolean,
+    val imported: Boolean = false,
 )
 
 /**
@@ -46,11 +48,84 @@ class LocalBackupManager(private val context: Context) {
                     modifiedAt = file.lastModified(),
                     sizeBytes = file.length(),
                     automatic = file.name.startsWith(AUTO_PREFIX),
+                    imported = file.name.startsWith(IMPORTED_PREFIX),
                 )
             }
 
     suspend fun createManualBackup(): LocalBackupInfo = withContext(Dispatchers.IO) {
         createBackup(MANUAL_PREFIX)
+    }
+
+    suspend fun exportBackup(
+        fileName: String,
+        destination: Uri,
+    ) = withContext(Dispatchers.IO) {
+        val archive = File(backupsDir, fileName)
+        require(
+            archive.exists() &&
+                archive.isFile &&
+                archive.parentFile?.canonicalFile == backupsDir.canonicalFile
+        ) { "Backup not found" }
+
+        context.contentResolver.openOutputStream(destination, "w").use { output ->
+            requireNotNull(output) { "Unable to open export destination" }
+            BufferedInputStream(FileInputStream(archive)).use { input ->
+                BufferedOutputStream(output).use { buffered ->
+                    input.copyTo(buffered, BUFFER_SIZE)
+                }
+            }
+        }
+    }
+
+    suspend fun importBackup(source: Uri): LocalBackupInfo = withContext(Dispatchers.IO) {
+        backupsDir.mkdirs()
+        val stamp = SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date())
+        val suffix = UUID.randomUUID().toString().take(8)
+        val target = File(backupsDir, "$IMPORTED_PREFIX-$stamp-$suffix.zip")
+        val temp = File(backupsDir, target.name + ".tmp")
+
+        try {
+            context.contentResolver.openInputStream(source).use { input ->
+                requireNotNull(input) { "Unable to open backup file" }
+                BufferedInputStream(input).use { buffered ->
+                    BufferedOutputStream(FileOutputStream(temp)).use { output ->
+                        buffered.copyTo(output, BUFFER_SIZE)
+                    }
+                }
+            }
+            require(temp.length() > 0L) { "Backup file is empty" }
+
+            val validationDir = File(
+                context.cacheDir,
+                "munote-backup-check-${UUID.randomUUID()}"
+            ).apply {
+                deleteRecursively()
+                mkdirs()
+            }
+            try {
+                unzipSafely(temp, validationDir)
+                require(validationDir.listFiles().orEmpty().isNotEmpty()) {
+                    "Backup archive contains no MuNote data"
+                }
+            } finally {
+                validationDir.deleteRecursively()
+            }
+
+            if (target.exists()) target.delete()
+            check(temp.renameTo(target)) { "Unable to import backup" }
+        } catch (error: Throwable) {
+            temp.delete()
+            target.delete()
+            throw error
+        }
+
+        LocalBackupInfo(
+            fileName = target.name,
+            modifiedAt = target.lastModified(),
+            sizeBytes = target.length(),
+            automatic = false,
+            imported = true,
+        )
     }
 
     suspend fun autoBackupIfDue(): LocalBackupInfo? = withContext(Dispatchers.IO) {
@@ -124,6 +199,7 @@ class LocalBackupManager(private val context: Context) {
             modifiedAt = target.lastModified(),
             sizeBytes = target.length(),
             automatic = prefix == AUTO_PREFIX,
+            imported = prefix == IMPORTED_PREFIX,
         )
     }
 
@@ -197,6 +273,7 @@ class LocalBackupManager(private val context: Context) {
     companion object {
         private const val MANUAL_PREFIX = "munote-manual"
         private const val AUTO_PREFIX = "munote-auto"
+        private const val IMPORTED_PREFIX = "munote-imported"
         private const val AUTO_INTERVAL_MS = 24L * 60L * 60L * 1000L
         private const val MAX_AUTO_BACKUPS = 7
         private const val BUFFER_SIZE = 256 * 1024
