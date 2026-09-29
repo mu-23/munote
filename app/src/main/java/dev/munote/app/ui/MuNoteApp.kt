@@ -13,6 +13,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.background
 import androidx.compose.foundation.basicMarquee
@@ -38,12 +39,11 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.pager.HorizontalPager
-import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -76,6 +76,8 @@ import androidx.compose.material.icons.filled.Redo
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.StarBorder
+import androidx.compose.material.icons.filled.SwapHoriz
+import androidx.compose.material.icons.filled.SwapVert
 import androidx.compose.material.icons.filled.TouchApp
 import androidx.compose.material.icons.filled.TextFields
 import androidx.compose.material.icons.filled.Undo
@@ -98,6 +100,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -1079,6 +1082,8 @@ private fun LanguageMenu() {
 
 private enum class LibraryView { ALL, FAVORITES, TRASH }
 
+private enum class PageFlowDirection { HORIZONTAL, VERTICAL }
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun LibraryHome(
@@ -1149,22 +1154,18 @@ private fun LibraryHome(
                         modifier = Modifier
                             .fillMaxWidth()
                             .horizontalScroll(rememberScrollState()),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
                         listOf(
-                            PageTemplate.BLANK to R.string.template_blank,
-                            PageTemplate.RULED to R.string.template_ruled,
-                            PageTemplate.GRID to R.string.template_grid,
-                            PageTemplate.DOT to R.string.template_dot,
-                        ).forEach { (template, labelRes) ->
-                            AssistChip(
-                                onClick = { newNotebookTemplate = template },
-                                label = {
-                                    Text(
-                                        (if (newNotebookTemplate == template) "✓ " else "") +
-                                            stringResource(labelRes)
-                                    )
-                                }
+                            PageTemplate.BLANK,
+                            PageTemplate.RULED,
+                            PageTemplate.GRID,
+                            PageTemplate.DOT,
+                        ).forEach { template ->
+                            TemplatePreviewCard(
+                                template = template,
+                                selected = newNotebookTemplate == template,
+                                onClick = { newNotebookTemplate = template }
                             )
                         }
                     }
@@ -1696,6 +1697,117 @@ private fun LibraryHome(
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
+private fun TemplatePreviewCard(
+    template: PageTemplate,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    val lineColor = MaterialTheme.colorScheme.outlineVariant
+    val accentColor = MaterialTheme.colorScheme.primary
+    val label = when (template) {
+        PageTemplate.BLANK -> stringResource(R.string.template_blank)
+        PageTemplate.RULED -> stringResource(R.string.template_ruled)
+        PageTemplate.GRID -> stringResource(R.string.template_grid)
+        PageTemplate.DOT -> stringResource(R.string.template_dot)
+    }
+
+    Surface(
+        onClick = onClick,
+        modifier = Modifier.width(96.dp),
+        shape = RoundedCornerShape(12.dp),
+        border = BorderStroke(
+            if (selected) 2.dp else 1.dp,
+            if (selected) accentColor else MaterialTheme.colorScheme.outlineVariant
+        ),
+        color = MaterialTheme.colorScheme.surface
+    ) {
+        Column(
+            modifier = Modifier.padding(8.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Surface(
+                modifier = Modifier
+                    .width(76.dp)
+                    .height(104.dp),
+                color = Color.White,
+                shape = RoundedCornerShape(4.dp),
+                shadowElevation = 1.dp
+            ) {
+                Canvas(Modifier.fillMaxSize().padding(5.dp)) {
+                    when (template) {
+                        PageTemplate.BLANK -> Unit
+
+                        PageTemplate.RULED -> {
+                            val gap = size.height / 8f
+                            for (i in 1..7) {
+                                val y = gap * i
+                                drawLine(
+                                    color = lineColor,
+                                    start = Offset(0f, y),
+                                    end = Offset(size.width, y),
+                                    strokeWidth = 1.dp.toPx()
+                                )
+                            }
+                        }
+
+                        PageTemplate.GRID -> {
+                            val gapX = size.width / 7f
+                            val gapY = size.height / 10f
+                            for (i in 1..6) {
+                                val x = gapX * i
+                                drawLine(
+                                    color = lineColor,
+                                    start = Offset(x, 0f),
+                                    end = Offset(x, size.height),
+                                    strokeWidth = 1.dp.toPx()
+                                )
+                            }
+                            for (i in 1..9) {
+                                val y = gapY * i
+                                drawLine(
+                                    color = lineColor,
+                                    start = Offset(0f, y),
+                                    end = Offset(size.width, y),
+                                    strokeWidth = 1.dp.toPx()
+                                )
+                            }
+                        }
+
+                        PageTemplate.DOT -> {
+                            val columns = 6
+                            val rows = 9
+                            for (row in 1..rows) {
+                                for (column in 1..columns) {
+                                    drawCircle(
+                                        color = lineColor,
+                                        radius = 1.dp.toPx(),
+                                        center = Offset(
+                                            size.width * column / (columns + 1f),
+                                            size.height * row / (rows + 1f)
+                                        )
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            Text(
+                label,
+                maxLines = 1,
+                style = MaterialTheme.typography.labelMedium,
+                color = if (selected) {
+                    MaterialTheme.colorScheme.primary
+                } else {
+                    MaterialTheme.colorScheme.onSurface
+                }
+            )
+        }
+    }
+}
+
+@Composable
 private fun LibraryDocumentCard(
     library: PdfLibrary,
     entry: LibraryEntry,
@@ -1946,10 +2058,55 @@ private fun ReaderScreen(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val stickerStore = remember { StickerStore(context) }
-    val pager = rememberPagerState(
-        initialPage = initialPage.coerceIn(0, (session.pageCount - 1).coerceAtLeast(0)),
-        pageCount = { session.pageCount }
+    val inputPrefs = remember {
+        context.getSharedPreferences(
+            "editor_preferences",
+            android.content.Context.MODE_PRIVATE
+        )
+    }
+    val initialSafePage = initialPage.coerceIn(
+        0,
+        (session.pageCount - 1).coerceAtLeast(0)
     )
+    val pageListState = rememberLazyListState(
+        initialFirstVisibleItemIndex = initialSafePage
+    )
+    var pageFlowDirection by remember {
+        mutableStateOf(
+            runCatching {
+                PageFlowDirection.valueOf(
+                    inputPrefs.getString(
+                        "page_flow_direction",
+                        PageFlowDirection.HORIZONTAL.name
+                    ) ?: PageFlowDirection.HORIZONTAL.name
+                )
+            }.getOrDefault(PageFlowDirection.HORIZONTAL)
+        )
+    }
+    val currentPage by remember(session.fingerprint, session.pageCount) {
+        derivedStateOf {
+            val layout = pageListState.layoutInfo
+            val visible = layout.visibleItemsInfo
+            if (visible.isEmpty()) {
+                pageListState.firstVisibleItemIndex.coerceIn(
+                    0,
+                    (session.pageCount - 1).coerceAtLeast(0)
+                )
+            } else {
+                val center = (layout.viewportStartOffset + layout.viewportEndOffset) / 2
+                visible.minByOrNull { item ->
+                    kotlin.math.abs((item.offset + item.size / 2) - center)
+                }?.index?.coerceIn(
+                    0,
+                    (session.pageCount - 1).coerceAtLeast(0)
+                ) ?: pageListState.firstVisibleItemIndex
+            }
+        }
+    }
+    LaunchedEffect(session.fingerprint, initialSafePage) {
+        pageListState.scrollToItem(initialSafePage)
+    }
+
     var query by remember { mutableStateOf("") }
     var hits by remember { mutableStateOf<List<SearchHit>>(emptyList()) }
     var selectedHit by remember { mutableIntStateOf(0) }
@@ -1975,9 +2132,10 @@ private fun ReaderScreen(
     var showThumbnails by remember { mutableStateOf(false) }
     var showBookmarksOnly by remember { mutableStateOf(false) }
     var showPageOverview by remember { mutableStateOf(false) }
+    var showReaderMoreMenu by remember { mutableStateOf(false) }
+    var showInputModeOptions by remember { mutableStateOf(false) }
     val topToolbarScroll = rememberScrollState()
     val pageHistory = remember { mutableStateListOf<Int>() }
-    val inputPrefs = remember { context.getSharedPreferences("editor_preferences", android.content.Context.MODE_PRIVATE) }
     var fingerWriting by remember { mutableStateOf(inputPrefs.getBoolean("finger_writing", false)) }
     var showPageJump by remember { mutableStateOf(false) }
     var pageJumpText by remember { mutableStateOf("") }
@@ -1993,7 +2151,7 @@ private fun ReaderScreen(
         if (uri != null) {
             scope.launch {
                 runCatching {
-                    imageStore.add(pager.currentPage, uri)
+                    imageStore.add(currentPage, uri)
                 }.onSuccess { image ->
                     activeImageId = image.id
                     imageRevision++
@@ -2018,7 +2176,7 @@ private fun ReaderScreen(
                 scope.launch {
                     runCatching {
                         imageStore.addSticker(
-                            index = pager.currentPage,
+                            index = currentPage,
                             sticker = sticker,
                             source = stickerStore.fileFor(sticker),
                         )
@@ -2156,19 +2314,19 @@ private fun ReaderScreen(
 
     suspend fun jumpToPage(page: Int, rememberLocation: Boolean = true) {
         val target = page.coerceIn(0, session.pageCount - 1)
-        if (target == pager.currentPage) return
+        if (target == currentPage) return
         if (rememberLocation) {
-            if (pageHistory.lastOrNull() != pager.currentPage) {
-                pageHistory += pager.currentPage
+            if (pageHistory.lastOrNull() != currentPage) {
+                pageHistory += currentPage
                 while (pageHistory.size > 20) pageHistory.removeAt(0)
             }
         }
-        pager.animateScrollToPage(target)
+        pageListState.animateScrollToItem(target)
     }
 
     suspend fun goBackInPageHistory() {
         val target = pageHistory.removeLastOrNull() ?: return
-        pager.animateScrollToPage(target.coerceIn(0, session.pageCount - 1))
+        pageListState.animateScrollToItem(target.coerceIn(0, session.pageCount - 1))
     }
 
     suspend fun goToHit(index: Int) {
@@ -2204,12 +2362,12 @@ private fun ReaderScreen(
 
     // Re-index the current page only after the user pauses writing. Continuous pen strokes keep
     // cancelling this delay, so handwriting recognition never runs in the latency-critical path.
-    LaunchedEffect(inkRevision, pager.currentPage, handwritingModelState) {
+    LaunchedEffect(inkRevision, currentPage, handwritingModelState) {
         if (inkRevision == 0 || handwritingModelState != HandwritingModelState.READY) {
             return@LaunchedEffect
         }
         delay(700)
-        val page = pager.currentPage
+        val page = currentPage
         val strokes = inkStore.page(page)
         if (strokes.isEmpty()) {
             runCatching { handwritingIndexStore.put(page, emptyList()) }
@@ -2236,12 +2394,12 @@ private fun ReaderScreen(
         selectedHit = selectedHit.coerceIn(0, (hits.size - 1).coerceAtLeast(0))
     }
 
-    LaunchedEffect(pager.currentPage) {
+    LaunchedEffect(currentPage) {
         lassoSelectionActive = false
         activeTextBoxId = null
         activeImageId = null
         activeInkView = null
-        onPageChanged(pager.currentPage)
+        onPageChanged(currentPage)
     }
 
     if (showPageJump) {
@@ -2305,7 +2463,7 @@ private fun ReaderScreen(
                         val targetPage = (newLinkTarget.toIntOrNull() ?: 1) - 1
                         scope.launch {
                             navigationStore.addLink(
-                                sourcePage = pager.currentPage,
+                                sourcePage = currentPage,
                                 targetPage = targetPage,
                                 label = newLinkLabel,
                             )
@@ -2344,7 +2502,7 @@ private fun ReaderScreen(
                     onClick = {
                         scope.launch {
                             navigationStore.addOutline(
-                                pageIndex = pager.currentPage,
+                                pageIndex = currentPage,
                                 title = newOutlineTitle,
                             )
                             navigationRevision++
@@ -2366,15 +2524,15 @@ private fun ReaderScreen(
 
     if (showNavigationPanel) {
         NavigationDialog(
-            currentPage = pager.currentPage,
+            currentPage = currentPage,
             pageCount = session.pageCount,
             outline = remember(navigationRevision) { navigationStore.allOutline() },
-            pageLinks = remember(navigationRevision, pager.currentPage) {
-                navigationStore.linksForPage(pager.currentPage)
+            pageLinks = remember(navigationRevision, currentPage) {
+                navigationStore.linksForPage(currentPage)
             },
             onDismiss = { showNavigationPanel = false },
             onAddLink = {
-                newLinkTarget = (pager.currentPage + 1).toString()
+                newLinkTarget = (currentPage + 1).toString()
                 showAddLink = true
             },
             onAddOutline = {
@@ -2403,7 +2561,7 @@ private fun ReaderScreen(
     if (showPageOverview) {
         PageOverviewDialog(
             session = session,
-            currentPage = pager.currentPage,
+            currentPage = currentPage,
             bookmarks = bookmarks,
             isNotebook = isNotebook,
             canManagePages = canManagePages,
@@ -2463,28 +2621,6 @@ private fun ReaderScreen(
                         style = MaterialTheme.typography.labelLarge
                     )
                     LanguageMenu()
-                    TextButton(onClick = { showNavigationPanel = true }) {
-                        Text(
-                            stringResource(R.string.navigation_title),
-                            maxLines = 1,
-                            style = MaterialTheme.typography.labelMedium
-                        )
-                    }
-                    TextButton(
-                        onClick = if (splitMode) onCloseSplit else onRequestSplit
-                    ) {
-                        Text(
-                            stringResource(
-                                if (splitMode) R.string.action_close_split
-                                else R.string.action_split_view
-                            ),
-                            maxLines = 1,
-                            style = MaterialTheme.typography.labelMedium
-                        )
-                    }
-                    IconButton(onClick = onOpenPdf) {
-                        Icon(Icons.Default.FolderOpen, contentDescription = stringResource(R.string.cd_import_another_pdf))
-                    }
                     if (exportRunning) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
@@ -2496,21 +2632,11 @@ private fun ReaderScreen(
                                 style = MaterialTheme.typography.labelSmall
                             )
                             IconButton(onClick = { exportJob?.cancel() }) {
-                                Icon(Icons.Default.Close, contentDescription = stringResource(R.string.cd_cancel_export))
-                            }
-                        }
-                    } else {
-                        IconButton(
-                            onClick = {
-                                exportLauncher.launch(
-                                    context.getString(
-                                        R.string.export_filename,
-                                        documentTitle.take(80).ifBlank { "MuNote" }
-                                    )
+                                Icon(
+                                    Icons.Default.Close,
+                                    contentDescription = stringResource(R.string.cd_cancel_export)
                                 )
                             }
-                        ) {
-                            Icon(Icons.Default.FileDownload, contentDescription = stringResource(R.string.cd_export_annotated_pdf))
                         }
                     }
                     IconButton(onClick = { showThumbnails = !showThumbnails }) {
@@ -2531,11 +2657,11 @@ private fun ReaderScreen(
                             )
                         }
                     }
-                    IconButton(onClick = { onToggleBookmark(pager.currentPage) }) {
+                    IconButton(onClick = { onToggleBookmark(currentPage) }) {
                         Icon(
-                            if (pager.currentPage in bookmarks) Icons.Default.Star
+                            if (currentPage in bookmarks) Icons.Default.Star
                             else Icons.Default.StarBorder,
-                            contentDescription = if (pager.currentPage in bookmarks) {
+                            contentDescription = if (currentPage in bookmarks) {
                                 stringResource(R.string.cd_remove_bookmark)
                             } else {
                                 stringResource(R.string.cd_add_bookmark)
@@ -2594,6 +2720,111 @@ private fun ReaderScreen(
                             style = MaterialTheme.typography.labelSmall
                         )
                         else -> Unit
+                    }
+
+                    Box {
+                        IconButton(onClick = { showReaderMoreMenu = true }) {
+                            Icon(
+                                Icons.Default.MoreVert,
+                                contentDescription = stringResource(R.string.reader_more)
+                            )
+                        }
+                        DropdownMenu(
+                            expanded = showReaderMoreMenu,
+                            onDismissRequest = { showReaderMoreMenu = false }
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.navigation_title)) },
+                                leadingIcon = { Icon(Icons.Default.List, contentDescription = null) },
+                                onClick = {
+                                    showReaderMoreMenu = false
+                                    showNavigationPanel = true
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = {
+                                    Text(
+                                        stringResource(
+                                            if (splitMode) R.string.action_close_split
+                                            else R.string.action_split_view
+                                        )
+                                    )
+                                },
+                                leadingIcon = {
+                                    Icon(Icons.Default.ContentCopy, contentDescription = null)
+                                },
+                                onClick = {
+                                    showReaderMoreMenu = false
+                                    if (splitMode) onCloseSplit() else onRequestSplit()
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.cd_import_another_pdf)) },
+                                leadingIcon = { Icon(Icons.Default.FolderOpen, contentDescription = null) },
+                                onClick = {
+                                    showReaderMoreMenu = false
+                                    onOpenPdf()
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.cd_export_annotated_pdf)) },
+                                leadingIcon = { Icon(Icons.Default.FileDownload, contentDescription = null) },
+                                enabled = !exportRunning,
+                                onClick = {
+                                    showReaderMoreMenu = false
+                                    exportLauncher.launch(
+                                        context.getString(
+                                            R.string.export_filename,
+                                            documentTitle.take(80).ifBlank { "MuNote" }
+                                        )
+                                    )
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.page_flow_horizontal)) },
+                                leadingIcon = {
+                                    Icon(Icons.Default.SwapHoriz, contentDescription = null)
+                                },
+                                trailingIcon = {
+                                    if (pageFlowDirection == PageFlowDirection.HORIZONTAL) {
+                                        Text("✓")
+                                    }
+                                },
+                                onClick = {
+                                    showReaderMoreMenu = false
+                                    pageFlowDirection = PageFlowDirection.HORIZONTAL
+                                    inputPrefs.edit()
+                                        .putString(
+                                            "page_flow_direction",
+                                            PageFlowDirection.HORIZONTAL.name
+                                        )
+                                        .apply()
+                                    scope.launch { pageListState.scrollToItem(currentPage) }
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.page_flow_vertical)) },
+                                leadingIcon = {
+                                    Icon(Icons.Default.SwapVert, contentDescription = null)
+                                },
+                                trailingIcon = {
+                                    if (pageFlowDirection == PageFlowDirection.VERTICAL) {
+                                        Text("✓")
+                                    }
+                                },
+                                onClick = {
+                                    showReaderMoreMenu = false
+                                    pageFlowDirection = PageFlowDirection.VERTICAL
+                                    inputPrefs.edit()
+                                        .putString(
+                                            "page_flow_direction",
+                                            PageFlowDirection.VERTICAL.name
+                                        )
+                                        .apply()
+                                    scope.launch { pageListState.scrollToItem(currentPage) }
+                                }
+                            )
+                        }
                     }
                 }
 
@@ -2656,7 +2887,7 @@ private fun ReaderScreen(
             if (showThumbnails) {
                 ThumbnailRail(
                     session = session,
-                    currentPage = pager.currentPage,
+                    currentPage = currentPage,
                     bookmarks = bookmarks,
                     showBookmarksOnly = showBookmarksOnly,
                     onPageClick = { page ->
@@ -2665,131 +2896,203 @@ private fun ReaderScreen(
                 )
             }
 
-            HorizontalPager(
-                state = pager,
+            BoxWithConstraints(
                 modifier = Modifier
                     .weight(1f)
-                    .fillMaxHeight(),
-                beyondViewportPageCount = 1,
-                userScrollEnabled = false
-            ) { page ->
-                PdfInkPage(
-                    session = session,
-                    pageIndex = page,
-                    tool = tool,
-                    strokes = remember(inkRevision, page) { inkStore.page(page) },
-                    textBoxes = remember(textRevision, page) { textStore.page(page) },
-                    images = remember(imageRevision, page) { imageStore.page(page) },
-                    imageStore = imageStore,
-                    links = remember(navigationRevision, page) {
-                        navigationStore.linksForPage(page)
-                    },
-                    activeTextBoxId = activeTextBoxId,
-                    activeImageId = activeImageId,
-                    highlight = hits.getOrNull(selectedHit)?.takeIf { it.pageIndex == page },
-                    inkColor = if (tool == InkTool.HIGHLIGHTER) highlighterColor else penColor,
-                    penWidthDp = penWidth,
-                    highlighterWidthDp = highlighterWidth,
-                    shape = selectedShape,
-                    brush = brush,
-                    eraserMode = eraserMode,
-                    eraserSizeDp = eraserSize,
-                    fingerWritingEnabled = fingerWriting,
-                    onShowPageOverview = ::openPageOverview,
-                    onAddTextBox = { x, y ->
-                        scope.launch {
-                            val box = textStore.add(page, x, y)
-                            activeTextBoxId = box.id
-                            textRevision++
-                        }
-                    },
-                    onUpdateTextBox = { box ->
-                        scope.launch {
-                            textStore.update(page, box)
-                            textRevision++
-                        }
-                    },
-                    onDeleteTextBox = { id ->
-                        scope.launch {
-                            textStore.delete(page, id)
-                            if (activeTextBoxId == id) activeTextBoxId = null
-                            textRevision++
-                        }
-                    },
-                    onActivateTextBox = { id -> activeTextBoxId = id },
-                    onUpdateImage = { image ->
-                        scope.launch {
-                            imageStore.update(page, image)
-                            imageRevision++
-                        }
-                    },
-                    onDeleteImage = { id ->
-                        scope.launch {
-                            imageStore.delete(page, id)
-                            if (activeImageId == id) activeImageId = null
-                            imageRevision++
-                        }
-                    },
-                    onActivateImage = { id -> activeImageId = id },
-                    onSaveSticker = { image ->
-                        scope.launch {
-                            runCatching {
-                                stickerStore.saveFromImage(
-                                    source = imageStore.imageFile(image),
-                                    image = image,
+                    .fillMaxHeight()
+            ) {
+                val viewportWidth = maxWidth
+                val viewportHeight = maxHeight
+
+                val pageContent: @Composable (Int) -> Unit = { page ->
+                    PdfInkPage(
+                        session = session,
+                        pageIndex = page,
+                        tool = tool,
+                        strokes = remember(inkRevision, page) { inkStore.page(page) },
+                        textBoxes = remember(textRevision, page) { textStore.page(page) },
+                        images = remember(imageRevision, page) { imageStore.page(page) },
+                        imageStore = imageStore,
+                        links = remember(navigationRevision, page) {
+                            navigationStore.linksForPage(page)
+                        },
+                        activeTextBoxId = activeTextBoxId,
+                        activeImageId = activeImageId,
+                        highlight = hits.getOrNull(selectedHit)?.takeIf { it.pageIndex == page },
+                        inkColor = if (tool == InkTool.HIGHLIGHTER) highlighterColor else penColor,
+                        penWidthDp = penWidth,
+                        highlighterWidthDp = highlighterWidth,
+                        shape = selectedShape,
+                        brush = brush,
+                        eraserMode = eraserMode,
+                        eraserSizeDp = eraserSize,
+                        fingerWritingEnabled = fingerWriting,
+                        continuousPaging = true,
+                        pageFlowDirection = pageFlowDirection,
+                        onContinuousPan = { pan ->
+                            scope.launch {
+                                val delta = if (
+                                    pageFlowDirection == PageFlowDirection.HORIZONTAL
+                                ) {
+                                    -pan.x
+                                } else {
+                                    -pan.y
+                                }
+                                pageListState.scrollBy(delta)
+                            }
+                        },
+                        onShowPageOverview = ::openPageOverview,
+                        onAddTextBox = { x, y ->
+                            scope.launch {
+                                val box = textStore.add(page, x, y)
+                                activeTextBoxId = box.id
+                                textRevision++
+                            }
+                        },
+                        onUpdateTextBox = { box ->
+                            scope.launch {
+                                textStore.update(page, box)
+                                textRevision++
+                            }
+                        },
+                        onDeleteTextBox = { id ->
+                            scope.launch {
+                                textStore.delete(page, id)
+                                if (activeTextBoxId == id) activeTextBoxId = null
+                                textRevision++
+                            }
+                        },
+                        onActivateTextBox = { id -> activeTextBoxId = id },
+                        onUpdateImage = { image ->
+                            scope.launch {
+                                imageStore.update(page, image)
+                                imageRevision++
+                            }
+                        },
+                        onDeleteImage = { id ->
+                            scope.launch {
+                                imageStore.delete(page, id)
+                                if (activeImageId == id) activeImageId = null
+                                imageRevision++
+                            }
+                        },
+                        onActivateImage = { id -> activeImageId = id },
+                        onSaveSticker = { image ->
+                            scope.launch {
+                                runCatching {
+                                    stickerStore.saveFromImage(
+                                        source = imageStore.imageFile(image),
+                                        image = image,
+                                    )
+                                }.onSuccess {
+                                    stickerRevision++
+                                    Toast.makeText(
+                                        context,
+                                        context.getString(R.string.toast_sticker_saved),
+                                        Toast.LENGTH_SHORT
+                                    ).show()
+                                }.onFailure { error ->
+                                    Toast.makeText(
+                                        context,
+                                        error.message ?: context.getString(R.string.error_sticker_save),
+                                        Toast.LENGTH_LONG
+                                    ).show()
+                                }
+                            }
+                        },
+                        onNavigateLink = { target ->
+                            scope.launch { jumpToPage(target) }
+                        },
+                        onUpdateLink = { link ->
+                            scope.launch {
+                                navigationStore.updateLink(link)
+                                navigationRevision++
+                            }
+                        },
+                        onViewReady = { view ->
+                            if (page == currentPage) activeInkView = view
+                        },
+                        onSelectionChanged = { selected ->
+                            if (page == currentPage) lassoSelectionActive = selected
+                        },
+                        onPageSwipe = { direction ->
+                            scope.launch {
+                                pageListState.animateScrollToItem(
+                                    (currentPage + direction)
+                                        .coerceIn(0, session.pageCount - 1)
                                 )
-                            }.onSuccess {
-                                stickerRevision++
-                                Toast.makeText(
-                                    context,
-                                    context.getString(R.string.toast_sticker_saved),
-                                    Toast.LENGTH_SHORT
-                                ).show()
-                            }.onFailure { error ->
-                                Toast.makeText(
-                                    context,
-                                    error.message ?: context.getString(R.string.error_sticker_save),
-                                    Toast.LENGTH_LONG
-                                ).show()
+                            }
+                        },
+                        onStroke = { stroke ->
+                            scope.launch {
+                                inkStore.append(page, stroke)
+                                inkRevision++
+                            }
+                        },
+                        onMutated = { strokes ->
+                            scope.launch {
+                                inkStore.replacePage(page, strokes)
+                                inkRevision++
                             }
                         }
-                    },
-                    onNavigateLink = { target ->
-                        scope.launch { jumpToPage(target) }
-                    },
-                    onUpdateLink = { link ->
-                        scope.launch {
-                            navigationStore.updateLink(link)
-                            navigationRevision++
-                        }
-                    },
-                    onViewReady = { view ->
-                        if (page == pager.currentPage) activeInkView = view
-                    },
-                    onSelectionChanged = { selected ->
-                        if (page == pager.currentPage) lassoSelectionActive = selected
-                    },
-                    onPageSwipe = { direction ->
-                        scope.launch {
-                            pager.animateScrollToPage(
-                                (pager.currentPage + direction).coerceIn(0, session.pageCount - 1)
-                            )
-                        }
-                    },
-                    onStroke = { stroke ->
-                        scope.launch {
-                            inkStore.append(page, stroke)
-                            inkRevision++
-                        }
-                    },
-                    onMutated = { strokes ->
-                        scope.launch {
-                            inkStore.replacePage(page, strokes)
-                            inkRevision++
+                    )
+                }
+
+                if (pageFlowDirection == PageFlowDirection.HORIZONTAL) {
+                    LazyRow(
+                        state = pageListState,
+                        modifier = Modifier.fillMaxSize(),
+                        contentPadding = PaddingValues(horizontal = 8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        items(
+                            count = session.pageCount,
+                            key = { it }
+                        ) { page ->
+                            Box(
+                                Modifier
+                                    .width(viewportWidth)
+                                    .height(viewportHeight)
+                            ) {
+                                pageContent(page)
+                            }
                         }
                     }
-                )
+                } else {
+                    LazyColumn(
+                        state = pageListState,
+                        modifier = Modifier.fillMaxSize(),
+                        contentPadding = PaddingValues(vertical = 8.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        items(
+                            count = session.pageCount,
+                            key = { it }
+                        ) { page ->
+                            Box(
+                                Modifier
+                                    .width(viewportWidth)
+                                    .height(viewportHeight)
+                            ) {
+                                pageContent(page)
+                            }
+                        }
+                    }
+                }
             }
+        }
+
+        if (showInputModeOptions) {
+            InputModeOptionsBar(
+                fingerWriting = fingerWriting,
+                onSelect = { useFinger ->
+                    fingerWriting = useFinger
+                    inputPrefs.edit()
+                        .putBoolean("finger_writing", useFinger)
+                        .apply()
+                    showInputModeOptions = false
+                }
+            )
         }
 
         if (tool == InkTool.SHAPE || tool == InkTool.RULER) {
@@ -2847,7 +3150,7 @@ private fun ReaderScreen(
                 },
                 onClearPage = {
                     scope.launch {
-                        inkStore.replacePage(pager.currentPage, emptyList())
+                        inkStore.replacePage(currentPage, emptyList())
                         inkRevision++
                     }
                 },
@@ -2912,16 +3215,21 @@ private fun ReaderScreen(
                 horizontalArrangement = Arrangement.Center
             ) {
                 ToolButton(
-                    selected = fingerWriting,
+                    selected = showInputModeOptions,
                     label = if (fingerWriting) {
                         stringResource(R.string.input_mode_finger)
                     } else {
                         stringResource(R.string.input_mode_pen)
                     },
-                    icon = { Icon(Icons.Default.TouchApp, contentDescription = null) },
+                    icon = {
+                        Icon(
+                            if (fingerWriting) Icons.Default.TouchApp else Icons.Default.Edit,
+                            contentDescription = null
+                        )
+                    },
                     onClick = {
-                        fingerWriting = !fingerWriting
-                        inputPrefs.edit().putBoolean("finger_writing", fingerWriting).apply()
+                        showInputModeOptions = !showInputModeOptions
+                        showPenOptions = false
                     }
                 )
                 if (pageHistory.isNotEmpty()) {
@@ -2943,11 +3251,9 @@ private fun ReaderScreen(
                     label = stringResource(R.string.tool_pen),
                     icon = { Icon(Icons.Default.Brush, contentDescription = null) },
                     onClick = {
-                        if (tool == InkTool.PEN) showPenOptions = !showPenOptions
-                        else {
-                            tool = InkTool.PEN
-                            showPenOptions = false
-                        }
+                        showInputModeOptions = false
+                        tool = InkTool.PEN
+                        showPenOptions = true
                     }
                 )
                 Spacer(Modifier.width(8.dp))
@@ -2956,11 +3262,9 @@ private fun ReaderScreen(
                     label = stringResource(R.string.tool_highlighter),
                     icon = { Text("▰") },
                     onClick = {
-                        if (tool == InkTool.HIGHLIGHTER) showPenOptions = !showPenOptions
-                        else {
-                            tool = InkTool.HIGHLIGHTER
-                            showPenOptions = false
-                        }
+                        showInputModeOptions = false
+                        tool = InkTool.HIGHLIGHTER
+                        showPenOptions = true
                     }
                 )
                 Spacer(Modifier.width(8.dp))
@@ -2969,6 +3273,7 @@ private fun ReaderScreen(
                     label = stringResource(R.string.tool_eraser),
                     icon = { Icon(Icons.Default.Clear, contentDescription = null) },
                     onClick = {
+                        showInputModeOptions = false
                         tool = InkTool.ERASER
                         showPenOptions = false
                     }
@@ -2979,6 +3284,7 @@ private fun ReaderScreen(
                     label = stringResource(R.string.tool_lasso),
                     icon = { Icon(Icons.Default.Gesture, contentDescription = null) },
                     onClick = {
+                        showInputModeOptions = false
                         tool = InkTool.LASSO
                         showPenOptions = false
                     }
@@ -2989,6 +3295,7 @@ private fun ReaderScreen(
                     label = stringResource(R.string.tool_text),
                     icon = { Icon(Icons.Default.TextFields, contentDescription = null) },
                     onClick = {
+                        showInputModeOptions = false
                         tool = InkTool.TEXT
                         showPenOptions = false
                     }
@@ -2999,6 +3306,7 @@ private fun ReaderScreen(
                     label = stringResource(R.string.tool_image),
                     icon = { Icon(Icons.Default.Image, contentDescription = null) },
                     onClick = {
+                        showInputModeOptions = false
                         tool = InkTool.IMAGE
                         showPenOptions = false
                         activeTextBoxId = null
@@ -3010,6 +3318,7 @@ private fun ReaderScreen(
                     label = stringResource(R.string.tool_shape),
                     icon = { Text("△○") },
                     onClick = {
+                        showInputModeOptions = false
                         tool = InkTool.SHAPE
                         showPenOptions = false
                     }
@@ -3020,6 +3329,7 @@ private fun ReaderScreen(
                     label = stringResource(R.string.tool_ruler),
                     icon = { Text("╱") },
                     onClick = {
+                        showInputModeOptions = false
                         tool = InkTool.RULER
                         showPenOptions = false
                     }
@@ -3041,10 +3351,10 @@ private fun ReaderScreen(
                 }
                 Spacer(Modifier.width(14.dp))
                 IconButton(
-                    enabled = inkStore.canUndo(pager.currentPage),
+                    enabled = inkStore.canUndo(currentPage),
                     onClick = {
                         scope.launch {
-                            inkStore.undo(pager.currentPage)
+                            inkStore.undo(currentPage)
                             inkRevision++
                         }
                     }
@@ -3052,10 +3362,10 @@ private fun ReaderScreen(
                     Icon(Icons.Default.Undo, contentDescription = stringResource(R.string.cd_undo))
                 }
                 IconButton(
-                    enabled = inkStore.canRedo(pager.currentPage),
+                    enabled = inkStore.canRedo(currentPage),
                     onClick = {
                         scope.launch {
-                            inkStore.redo(pager.currentPage)
+                            inkStore.redo(currentPage)
                             inkRevision++
                         }
                     }
@@ -3066,7 +3376,7 @@ private fun ReaderScreen(
                 IconButton(
                     onClick = {
                         scope.launch {
-                            jumpToPage((pager.currentPage - 1).coerceAtLeast(0), rememberLocation = false)
+                            jumpToPage((currentPage - 1).coerceAtLeast(0), rememberLocation = false)
                         }
                     }
                 ) {
@@ -3074,14 +3384,14 @@ private fun ReaderScreen(
                 }
                 Surface(
                     onClick = {
-                        pageJumpText = (pager.currentPage + 1).toString()
+                        pageJumpText = (currentPage + 1).toString()
                         showPageJump = true
                     },
                     shape = CircleShape,
                     color = MaterialTheme.colorScheme.surfaceVariant
                 ) {
                     Text(
-                        "${pager.currentPage + 1} / ${session.pageCount}",
+                        "${currentPage + 1} / ${session.pageCount}",
                         modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
                         style = MaterialTheme.typography.labelLarge
                     )
@@ -3090,7 +3400,7 @@ private fun ReaderScreen(
                     onClick = {
                         scope.launch {
                             jumpToPage(
-                                (pager.currentPage + 1).coerceAtMost(session.pageCount - 1),
+                                (currentPage + 1).coerceAtMost(session.pageCount - 1),
                                 rememberLocation = false
                             )
                         }
@@ -3745,17 +4055,80 @@ private fun ToolButton(
 ) {
     Surface(
         onClick = onClick,
-        shape = CircleShape,
-        color = if (selected) MaterialTheme.colorScheme.primaryContainer
-        else MaterialTheme.colorScheme.surfaceVariant
+        modifier = Modifier.size(width = 50.dp, height = 54.dp),
+        shape = RoundedCornerShape(14.dp),
+        color = if (selected) {
+            MaterialTheme.colorScheme.primaryContainer
+        } else {
+            Color.Transparent
+        }
     ) {
-        Row(
-            Modifier.padding(horizontal = 14.dp, vertical = 9.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        Column(
+            modifier = Modifier.padding(horizontal = 5.dp, vertical = 5.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
         ) {
             icon()
-            Text(label, style = MaterialTheme.typography.labelLarge)
+            Spacer(Modifier.height(2.dp))
+            Text(
+                label,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp)
+            )
+        }
+    }
+}
+
+@Composable
+private fun InputModeOptionsBar(
+    fingerWriting: Boolean,
+    onSelect: (Boolean) -> Unit,
+) {
+    Surface(
+        tonalElevation = 3.dp,
+        color = MaterialTheme.colorScheme.surface
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            AssistChip(
+                onClick = { onSelect(false) },
+                label = {
+                    Text(
+                        (if (!fingerWriting) "✓ " else "") +
+                            stringResource(R.string.input_mode_pen)
+                    )
+                },
+                leadingIcon = {
+                    Icon(Icons.Default.Edit, contentDescription = null)
+                }
+            )
+            AssistChip(
+                onClick = { onSelect(true) },
+                label = {
+                    Text(
+                        (if (fingerWriting) "✓ " else "") +
+                            stringResource(R.string.input_mode_finger)
+                    )
+                },
+                leadingIcon = {
+                    Icon(Icons.Default.TouchApp, contentDescription = null)
+                }
+            )
+            Text(
+                stringResource(
+                    if (fingerWriting) R.string.input_mode_finger_hint
+                    else R.string.input_mode_pen_hint
+                ),
+                modifier = Modifier.weight(1f),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.bodySmall
+            )
         }
     }
 }
@@ -4655,6 +5028,9 @@ private fun PdfInkPage(
     eraserMode: EraserMode,
     eraserSizeDp: Float,
     fingerWritingEnabled: Boolean,
+    continuousPaging: Boolean,
+    pageFlowDirection: PageFlowDirection,
+    onContinuousPan: (Offset) -> Unit,
     onShowPageOverview: () -> Unit,
     onAddTextBox: (Float, Float) -> Unit,
     onUpdateTextBox: (TextBoxNote) -> Unit,
@@ -4731,7 +5107,13 @@ private fun PdfInkPage(
             }
         }
 
-        val gestureModifier = Modifier.pointerInput(pageIndex, fingerWritingEnabled, tool) {
+        val gestureModifier = Modifier.pointerInput(
+            pageIndex,
+            fingerWritingEnabled,
+            tool,
+            continuousPaging,
+            pageFlowDirection,
+        ) {
             awaitEachGesture {
                 val first = awaitFirstDown(requireUnconsumed = false)
 
@@ -4787,11 +5169,19 @@ private fun PdfInkPage(
                                 twoFingerPanX += panChange.x
                                 twoFingerPanY += panChange.y
 
-                                // When the page is already enlarged, two fingers pan it normally.
-                                // At fit-to-page scale we still collect the drag so a horizontal
-                                // two-finger swipe can turn pages in Touch mode.
-                                applyTransform(zoomChange, panChange)
-                                event.changes.forEach { it.consume() }
+                                val realPinch = kotlin.math.abs(zoomChange - 1f) > 0.012f
+                                if (scale > 1.01f || realPinch) {
+                                    applyTransform(zoomChange, panChange)
+                                    event.changes.forEach { it.consume() }
+                                } else if (continuousPaging && fingerWritingEnabled) {
+                                    // Touch-writing reserves one finger for ink. Two fingers
+                                    // directly drive the continuous page list instead.
+                                    onContinuousPan(panChange)
+                                    event.changes.forEach { it.consume() }
+                                } else if (!continuousPaging) {
+                                    // Legacy discrete paging still owns two-finger swipes.
+                                    event.changes.forEach { it.consume() }
+                                }
                             }
 
                             down.size == 1 && !fingerWritingEnabled && tool != InkTool.TEXT -> {
@@ -4800,11 +5190,14 @@ private fun PdfInkPage(
 
                                 if (pinched || scale > 1.01f) {
                                     applyTransform(1f, delta)
-                                } else {
+                                    change.consume()
+                                } else if (!continuousPaging) {
                                     dragX += delta.x
                                     dragY += delta.y
+                                    change.consume()
                                 }
-                                change.consume()
+                                // In continuous mode, fit-to-page one-finger drags are left
+                                // unconsumed so the parent LazyRow/LazyColumn can scroll freely.
                             }
                         }
                     }
@@ -4812,6 +5205,7 @@ private fun PdfInkPage(
                     val thresholdPx = with(density) { 72.dp.toPx() }
 
                     if (
+                        !continuousPaging &&
                         !fingerWritingEnabled &&
                         tool != InkTool.TEXT && tool != InkTool.IMAGE &&
                         !pinched &&
@@ -4827,6 +5221,7 @@ private fun PdfInkPage(
                     // two-finger gesture. Only treat it as a page swipe when there was little
                     // actual pinch zoom; otherwise the user's intent was zooming.
                     if (
+                        !continuousPaging &&
                         pinched &&
                         !threeFingerGesture &&
                         scale <= 1.01f &&
