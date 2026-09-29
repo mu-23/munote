@@ -42,8 +42,8 @@ jobs:
           test -x "$AAPT"
           test -x "$APKSIGNER"
           "$AAPT" dump badging "$APK" | grep "package: name='dev.munote.app.debug'"
-          "$APKSIGNER" verify --print-certs "$APK" |
-            grep -i "29:32:58:F5:97:70:E0:FD:5E:75:F6:49:7E:50:6D:9C:95:DF:CF:82:C7:55:DE:66:DD:76:DE:D5:4A:46:7D:63"
+          "$APKSIGNER" verify --print-certs "$APK" | tee /tmp/munote-apk-certs.txt
+          grep -i "293258f59770e0fd5e75f6497e506d9c95dfcf82c755de66dd76ded54a467d63" /tmp/munote-apk-certs.txt
 
       - name: Prepare named test APK
         run: cp app/build/outputs/apk/debug/app-debug.apk "MuNote-Test-${MUNOTE_VERSION_NAME}.apk"
