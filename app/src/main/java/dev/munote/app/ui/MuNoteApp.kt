@@ -5201,15 +5201,16 @@ private fun PdfInkPage(
                             } else {
                                 panChange.y
                             }
-                            if (lastTwoFingerTime != 0L) {
-                                val dt = (event.uptimeMillis - lastTwoFingerTime)
+                            val eventTime = down.firstOrNull()?.uptimeMillis ?: 0L
+                            if (lastTwoFingerTime != 0L && eventTime != 0L) {
+                                val dt = (eventTime - lastTwoFingerTime)
                                     .coerceAtLeast(1L)
                                     .toFloat()
                                 val instantVelocity = axisDelta * 1000f / dt
                                 twoFingerAxisVelocity =
                                     twoFingerAxisVelocity * 0.68f + instantVelocity * 0.32f
                             }
-                            lastTwoFingerTime = event.uptimeMillis
+                            if (eventTime != 0L) lastTwoFingerTime = eventTime
 
                             if (continuousPaging) {
                                 onDocumentTransform(zoomChange, panChange)
