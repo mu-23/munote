@@ -88,58 +88,77 @@ class ChineseHandwritingRecognizer(private val context: Context) {
     }
 
     suspend fun recognizePage(strokes: List<InkStroke>): List<HandwritingBlock> {
-        val penStrokes = strokes.filter { !it.highlighter && it.points.isNotEmpty() }
+        val penStrokes = strokes
+            .asSequence()
+            .filter { !it.highlighter }
+            .mapNotNull { stroke ->
+                val safePoints = stroke.points.filter { point ->
+                    point.x.isFinite() &&
+                        point.y.isFinite() &&
+                        point.pressure.isFinite() &&
+                        point.timeMs >= 0L
+                }
+                if (safePoints.isEmpty()) null
+                else stroke.copy(points = safePoints)
+            }
+            .toList()
         if (penStrokes.isEmpty()) return emptyList()
         if (!isReady()) return emptyList()
 
-        val lines = clusterIntoLines(penStrokes)
+        val lines = runCatching { clusterIntoLines(penStrokes) }
+            .getOrElse { return emptyList() }
         val out = ArrayList<HandwritingBlock>(lines.size)
 
         for (line in lines) {
-            val bounds = boundsOf(line)
-            val inkBuilder = Ink.builder()
+            val block = runCatching {
+                val bounds = boundsOf(line)
+                val inkBuilder = Ink.builder()
 
-            line.forEach { stroke ->
-                val strokeBuilder = Ink.Stroke.builder()
-                stroke.points.forEach { point ->
-                    strokeBuilder.addPoint(
-                        Ink.Point.create(
-                            point.x * PAGE_COORDS,
-                            (point.y - bounds.top) * PAGE_COORDS,
-                            point.timeMs,
+                line.forEach { stroke ->
+                    val strokeBuilder = Ink.Stroke.builder()
+                    stroke.points.forEach { point ->
+                        strokeBuilder.addPoint(
+                            Ink.Point.create(
+                                point.x.coerceIn(0f, 1f) * PAGE_COORDS,
+                                (point.y.coerceIn(0f, 1f) - bounds.top) * PAGE_COORDS,
+                                point.timeMs,
+                            )
+                        )
+                    }
+                    inkBuilder.addStroke(strokeBuilder.build())
+                }
+
+                val lineHeight = ((bounds.bottom - bounds.top) * PAGE_COORDS)
+                    .takeIf { it.isFinite() }
+                    ?.coerceAtLeast(MIN_WRITING_HEIGHT)
+                    ?: MIN_WRITING_HEIGHT
+                val recognitionContext = RecognitionContext.builder()
+                    .setWritingArea(
+                        WritingArea(
+                            PAGE_COORDS,
+                            (lineHeight * 1.7f).coerceAtMost(PAGE_COORDS),
                         )
                     )
-                }
-                inkBuilder.addStroke(strokeBuilder.build())
-            }
+                    .build()
 
-            val lineHeight = ((bounds.bottom - bounds.top) * PAGE_COORDS)
-                .coerceAtLeast(MIN_WRITING_HEIGHT)
-            val context = RecognitionContext.builder()
-                .setWritingArea(
-                    WritingArea(
-                        PAGE_COORDS,
-                        (lineHeight * 1.7f).coerceAtMost(PAGE_COORDS),
+                val result = recognizer
+                    .recognize(inkBuilder.build(), recognitionContext)
+                    .awaitTask()
+                val text = result.candidates.firstOrNull()?.text?.trim().orEmpty()
+                if (text.isBlank()) return@runCatching null
+
+                HandwritingBlock(
+                    text = text,
+                    rect = OcrRect(
+                        left = bounds.left.coerceIn(0f, 1f),
+                        top = bounds.top.coerceIn(0f, 1f),
+                        right = bounds.right.coerceIn(0f, 1f),
+                        bottom = bounds.bottom.coerceIn(0f, 1f),
                     )
                 )
-                .build()
+            }.getOrNull()
 
-            val result = runCatching {
-                recognizer.recognize(inkBuilder.build(), context).awaitTask()
-            }.getOrNull() ?: continue
-
-            val text = result.candidates.firstOrNull()?.text?.trim().orEmpty()
-            if (text.isBlank()) continue
-
-            out += HandwritingBlock(
-                text = text,
-                rect = OcrRect(
-                    left = bounds.left.coerceIn(0f, 1f),
-                    top = bounds.top.coerceIn(0f, 1f),
-                    right = bounds.right.coerceIn(0f, 1f),
-                    bottom = bounds.bottom.coerceIn(0f, 1f),
-                )
-            )
+            if (block != null) out += block
         }
 
         return out

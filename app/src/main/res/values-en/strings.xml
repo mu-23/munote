@@ -100,8 +100,8 @@
     <string name="tool_highlighter_full">Highlighter</string>
     <string name="input_mode_pen">Pen mode</string>
     <string name="input_mode_finger">Touch mode</string>
-    <string name="input_mode_pen_hint">Write with a stylus; use fingers to turn pages and zoom</string>
-    <string name="input_mode_finger_hint">Write with one finger; pan or zoom with two fingers</string>
+    <string name="input_mode_pen_hint">Pen mode: the stylus writes while fingers scroll continuously, pan, and zoom.</string>
+    <string name="input_mode_finger_hint">Touch mode: one finger writes; use two fingers to scroll continuously, pan, and zoom.</string>
     <string name="page_overview_title">Page overview</string>
     <string name="page_overview_hint">Pinch inward with three fingers to open this view quickly</string>
     <string name="cd_back_previous_location">Return to previous location</string>
@@ -234,4 +234,8 @@
     <string name="toast_backup_imported">Backup file imported into MuNote</string>
     <string name="local_backups_uninstall_warning">Important: in-app backups are still private MuNote app data and are removed when the app is uninstalled. Before uninstalling or moving devices, manually export at least one backup to a location you choose.</string>
 
+
+    <string name="reader_more">More</string>
+    <string name="page_flow_horizontal">Continuous horizontal pages</string>
+    <string name="page_flow_vertical">Continuous vertical pages</string>
 </resources>
