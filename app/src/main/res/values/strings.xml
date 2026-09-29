@@ -100,8 +100,8 @@
     <string name="tool_highlighter_full">荧光笔</string>
     <string name="input_mode_pen">笔模式</string>
     <string name="input_mode_finger">手模式</string>
-    <string name="input_mode_pen_hint">触控笔书写，手指用于翻页和缩放</string>
-    <string name="input_mode_finger_hint">单指书写，两指拖动或缩放</string>
+    <string name="input_mode_pen_hint">笔模式：触控笔负责书写，手指可以连续翻页、拖动和缩放。</string>
+    <string name="input_mode_finger_hint">手模式：单指可以直接书写；双指用于连续翻页、拖动和缩放。</string>
     <string name="page_overview_title">页面缩略图</string>
     <string name="page_overview_hint">三指向中间聚合可快速打开这里</string>
     <string name="cd_back_previous_location">回到刚才的位置</string>
@@ -238,7 +238,4 @@
     <string name="reader_more">更多</string>
     <string name="page_flow_horizontal">横向连续翻页</string>
     <string name="page_flow_vertical">纵向连续翻页</string>
-    <string name="input_mode_pen_hint">笔模式：触控笔负责书写，手指可以连续翻页、拖动和缩放。</string>
-    <string name="input_mode_finger_hint">手模式：单指可以直接书写；双指用于连续翻页、拖动和缩放。</string>
-
 </resources>
