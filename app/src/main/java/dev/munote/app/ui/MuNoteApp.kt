@@ -120,6 +120,7 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.PointerType
 import androidx.compose.ui.input.pointer.pointerInput
@@ -2339,27 +2340,6 @@ private fun ReaderScreen(
         showPageOverview = true
     }
 
-    LaunchedEffect(session.fingerprint, handwritingModelState) {
-        if (handwritingModelState != HandwritingModelState.READY) return@LaunchedEffect
-
-        // Recognition is derived/index data. A malformed old stroke or an ML Kit failure must
-        // never make the source document unopenable. Rebuild in the background, page by page,
-        // and isolate failures to the affected page.
-        for (page in inkStore.pageIndices()) {
-            val strokes = inkStore.page(page)
-            if (strokes.isEmpty()) continue
-            val blocks = runCatching {
-                handwritingRecognizer.recognizePage(strokes)
-            }.getOrNull() ?: continue
-            runCatching {
-                handwritingIndexStore.put(page, blocks)
-            }.onSuccess {
-                handwritingRevision++
-            }
-            delay(40)
-        }
-    }
-
     // Re-index the current page only after the user pauses writing. Continuous pen strokes keep
     // cancelling this delay, so handwriting recognition never runs in the latency-critical path.
     LaunchedEffect(inkRevision, currentPage, handwritingModelState) {
@@ -3222,10 +3202,11 @@ private fun ReaderScreen(
                         stringResource(R.string.input_mode_pen)
                     },
                     icon = {
-                        Icon(
-                            if (fingerWriting) Icons.Default.TouchApp else Icons.Default.Edit,
-                            contentDescription = null
-                        )
+                        if (fingerWriting) {
+                            Icon(Icons.Default.TouchApp, contentDescription = null)
+                        } else {
+                            PenNibIcon()
+                        }
                     },
                     onClick = {
                         showInputModeOptions = !showInputModeOptions
@@ -4043,6 +4024,42 @@ private fun ShapeOptionsBar(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun PenNibIcon(
+    modifier: Modifier = Modifier.size(24.dp),
+) {
+    val color = MaterialTheme.colorScheme.onSurface
+    Canvas(modifier) {
+        val stroke = 1.7.dp.toPx()
+        val nib = Path().apply {
+            moveTo(size.width * 0.50f, size.height * 0.06f)
+            lineTo(size.width * 0.89f, size.height * 0.44f)
+            lineTo(size.width * 0.68f, size.height * 0.86f)
+            lineTo(size.width * 0.32f, size.height * 0.86f)
+            lineTo(size.width * 0.11f, size.height * 0.44f)
+            close()
+        }
+        drawPath(
+            path = nib,
+            color = color,
+            style = androidx.compose.ui.graphics.drawscope.Stroke(width = stroke)
+        )
+        val center = Offset(size.width * 0.50f, size.height * 0.49f)
+        drawCircle(
+            color = color,
+            radius = 1.9.dp.toPx(),
+            center = center,
+            style = androidx.compose.ui.graphics.drawscope.Stroke(width = stroke)
+        )
+        drawLine(
+            color = color,
+            start = Offset(size.width * 0.50f, size.height * 0.57f),
+            end = Offset(size.width * 0.50f, size.height * 0.84f),
+            strokeWidth = stroke
+        )
     }
 }
 

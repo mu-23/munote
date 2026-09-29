@@ -102,7 +102,10 @@ class ChineseHandwritingRecognizer(private val context: Context) {
                 else stroke.copy(points = safePoints)
             }
             .toList()
-        if (penStrokes.isEmpty()) return emptyList()
+        // A lone stroke is often a line, gesture, or unfinished mark rather than
+        // searchable handwriting. More importantly, avoiding recognition of a single malformed
+        // legacy stroke keeps ML Kit off the document-open crash path.
+        if (penStrokes.size < 2) return emptyList()
         if (!isReady()) return emptyList()
 
         val lines = runCatching { clusterIntoLines(penStrokes) }
