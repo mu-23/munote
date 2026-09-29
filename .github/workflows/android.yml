@@ -34,6 +34,17 @@ jobs:
       - name: Build fixed-signature test APK
         run: gradle :app:assembleDebug --stacktrace
 
+      - name: Verify built APK identity and signature
+        run: |
+          APK="app/build/outputs/apk/debug/app-debug.apk"
+          AAPT="$(find "$ANDROID_HOME/build-tools" -type f -name aapt | sort -V | tail -n 1)"
+          APKSIGNER="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -n 1)"
+          test -x "$AAPT"
+          test -x "$APKSIGNER"
+          "$AAPT" dump badging "$APK" | grep "package: name='dev.munote.app.debug'"
+          "$APKSIGNER" verify --print-certs "$APK" |
+            grep -i "29:32:58:F5:97:70:E0:FD:5E:75:F6:49:7E:50:6D:9C:95:DF:CF:82:C7:55:DE:66:DD:76:DE:D5:4A:46:7D:63"
+
       - name: Prepare named test APK
         run: cp app/build/outputs/apk/debug/app-debug.apk "MuNote-Test-${MUNOTE_VERSION_NAME}.apk"
 
