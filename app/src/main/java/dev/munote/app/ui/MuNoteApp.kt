@@ -3222,10 +3222,11 @@ private fun ReaderScreen(
                         stringResource(R.string.input_mode_pen)
                     },
                     icon = {
-                        Icon(
-                            if (fingerWriting) Icons.Default.TouchApp else Icons.Default.Edit,
-                            contentDescription = null
-                        )
+                        if (fingerWriting) {
+                            Icon(Icons.Default.TouchApp, contentDescription = null)
+                        } else {
+                            Text("✒", fontSize = 22.sp)
+                        }
                     },
                     onClick = {
                         showInputModeOptions = !showInputModeOptions
@@ -4105,7 +4106,7 @@ private fun InputModeOptionsBar(
                     )
                 },
                 leadingIcon = {
-                    Icon(Icons.Default.Edit, contentDescription = null)
+                    Text("✒", fontSize = 18.sp)
                 }
             )
             AssistChip(

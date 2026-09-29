@@ -237,13 +237,18 @@ class InkStore(context: Context, fingerprint: String) {
     }
 
     private fun persist() {
-        val document = synchronized(lock) {
-            InkDocument(pages.mapValues { (_, value) -> value.toList() })
+        synchronized(lock) {
+            // Keep snapshot creation and the temp-file swap under the same lock. Multiple pen-up
+            // callbacks can reach Dispatchers.IO at nearly the same time; without serializing the
+            // file swap they can race on the same .tmp file and leave a broken ink sidecar.
+            val document = InkDocument(
+                pages.mapValues { (_, value) -> value.toList() }
+            )
+            val tmp = File(file.parentFile, file.name + ".tmp")
+            tmp.writeText(json.encodeToString(document))
+            if (file.exists()) file.delete()
+            check(tmp.renameTo(file)) { "Unable to persist ink" }
         }
-        val tmp = File(file.parentFile, file.name + ".tmp")
-        tmp.writeText(json.encodeToString(document))
-        if (file.exists()) file.delete()
-        check(tmp.renameTo(file)) { "Unable to persist ink" }
     }
 
     companion object {
