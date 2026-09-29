@@ -226,4 +226,12 @@
     <string name="page_overview_manage_pdf_hint">长按并拖动页面即可排序；右上角菜单可以复制或删除页面。这里只改变 MuNote 里的页面顺序，原始 PDF 文件不会被改写。</string>
     <string name="error_page_update">页面管理操作失败</string>
 
+
+    <string name="action_import_backup">导入备份文件</string>
+    <string name="action_export_backup">导出</string>
+    <string name="backup_imported">导入的备份</string>
+    <string name="toast_backup_exported">备份文件已导出</string>
+    <string name="toast_backup_imported">备份文件已导入 MuNote</string>
+    <string name="local_backups_uninstall_warning">注意：应用内备份也属于 MuNote 私有数据，卸载应用会一起清除。需要换机或卸载前，请把至少一份备份手动“导出”到你选择的位置。</string>
+
 </resources>
